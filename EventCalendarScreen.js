@@ -1,0 +1,164 @@
+// EventCalendarScreen.js
+import React, { useEffect, useState } from "react";
+import { View, Text, FlatList, StyleSheet, Dimensions, Modal, TouchableOpacity, ScrollView } from "react-native";
+import { collection, onSnapshot } from "firebase/firestore";
+import { db } from "./firebaseConfig";
+import { Calendar } from "react-native-calendars";
+
+export default function EventCalendarScreen() {
+  const [events, setEvents] = useState([]);
+  const [markedDates, setMarkedDates] = useState({});
+  const [modalVisible, setModalVisible] = useState(false);
+  const [selectedDateEvents, setSelectedDateEvents] = useState([]);
+  const [selectedDateStr, setSelectedDateStr] = useState("");
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, "events"), (snapshot) => {
+      const data = snapshot.docs
+        .map((doc) => {
+          const item = { id: doc.id, ...doc.data() };
+
+          // Convert Firestore Timestamp or string to Date
+          if (item.start?.toDate) {
+            item.dateObj = item.start.toDate();
+          } else if (item.start) {
+            item.dateObj = new Date(item.start + "T00:00:00");
+          }
+
+          return item;
+        })
+        .filter((e) => e.dateObj);
+
+      // Sort events by date
+      data.sort((a, b) => a.dateObj - b.dateObj);
+
+      setEvents(data);
+
+      // Mark dates on calendar
+      let marks = {};
+      const todayStr = new Date().toISOString().split("T")[0];
+
+      data.forEach((event) => {
+        const dateStr = event.dateObj.toISOString().split("T")[0];
+        marks[dateStr] = {
+          marked: true,
+          dotColor: dateStr === todayStr ? "orange" : "#1abc9c",
+        };
+      });
+
+      setMarkedDates(marks);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const renderEvent = ({ item }) => {
+    const eventDate = item.dateObj;
+    if (!eventDate) return null;
+
+    const month = eventDate.toLocaleString("default", { month: "short" }).toUpperCase();
+    const day = eventDate.getDate();
+
+    return (
+      <View style={styles.eventCard}>
+        <View style={styles.dateBox}>
+          <Text style={styles.monthText}>{month}</Text>
+          <Text style={styles.dayText}>{day}</Text>
+        </View>
+        <View style={styles.eventInfo}>
+          <Text style={styles.eventTitle}>{item.title}</Text>
+          <Text style={styles.eventTime}>
+            {item.startTime} - {item.endTime}
+          </Text>
+        </View>
+      </View>
+    );
+  };
+
+  // Handle day press
+  const onDayPress = (day) => {
+    const eventsForDay = events.filter(
+      (e) => e.dateObj.toISOString().split("T")[0] === day.dateString
+    );
+
+    if (eventsForDay.length > 0) {
+      setSelectedDateEvents(eventsForDay);
+      setSelectedDateStr(day.dateString);
+      setModalVisible(true);
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <Calendar
+        markedDates={markedDates}
+        onDayPress={onDayPress}
+        theme={{
+          todayTextColor: "#e74c3c",
+          arrowColor: "#34495e",
+        }}
+        style={styles.calendar}
+      />
+
+      <Text style={styles.upcomingTitle}>Upcoming Events</Text>
+      <FlatList
+        data={events}
+        keyExtractor={(item) => item.id}
+        renderItem={renderEvent}
+        contentContainerStyle={{ paddingBottom: 20 }}
+      />
+
+      {/* Modal for events of selected date */}
+      <Modal
+        visible={modalVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setModalVisible(false)}
+      >
+        <View style={styles.modalBackground}>
+          <View style={styles.modalContainer}>
+            <Text style={styles.modalTitle}>Events on {selectedDateStr}</Text>
+            <ScrollView style={{ maxHeight: 300 }}>
+              {selectedDateEvents.map((event) => (
+                <View key={event.id} style={styles.modalEvent}>
+                  <Text style={styles.modalEventTitle}>{event.title}</Text>
+                  <Text style={styles.modalEventTime}>{event.startTime} - {event.endTime}</Text>
+                </View>
+              ))}
+            </ScrollView>
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={() => setModalVisible(false)}
+            >
+              <Text style={{ color: "#fff", fontWeight: "bold" }}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+const { width } = Dimensions.get("window");
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#fff", padding: 10 },
+  calendar: { borderRadius: 8, elevation: 3, marginBottom: 15 },
+  upcomingTitle: { fontSize: 18, fontWeight: "bold", marginBottom: 10, color: "#2c3e50" },
+  eventCard: { flexDirection: "row", backgroundColor: "#ecf0f1", padding: 10, borderRadius: 8, marginBottom: 10 },
+  dateBox: { width: 50, height: 50, backgroundColor: "#1abc9c", borderRadius: 8, justifyContent: "center", alignItems: "center", marginRight: 10 },
+  monthText: { color: "#fff", fontWeight: "bold", fontSize: 12 },
+  dayText: { color: "#fff", fontWeight: "bold", fontSize: 18 },
+  eventInfo: { flex: 1, justifyContent: "center" },
+  eventTitle: { fontSize: 16, fontWeight: "600", color: "#34495e" },
+  eventTime: { fontSize: 14, color: "#7f8c8d" },
+
+  // Modal styles
+  modalBackground: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center" },
+  modalContainer: { backgroundColor: "#fff", width: width * 0.8, borderRadius: 10, padding: 20 },
+  modalTitle: { fontSize: 16, fontWeight: "bold", marginBottom: 10 },
+  modalEvent: { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "#ccc" },
+  modalEventTitle: { fontSize: 14, fontWeight: "600" },
+  modalEventTime: { fontSize: 12, color: "#7f8c8d" },
+  closeButton: { backgroundColor: "#1abc9c", padding: 10, borderRadius: 8, marginTop: 10, alignItems: "center" },
+});
