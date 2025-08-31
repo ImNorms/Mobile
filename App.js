@@ -11,6 +11,8 @@ import AccountingScreen from "./AccountingScreen";
 import ComplaintsScreen from "./ComplaintsScreen";
 import CommitteeScreen from "./CommitteeScreen";
 import MembersScreen from "./MembersScreen";
+import FileComplaintScreen from "./FileComplaintScreen";
+
 
 
 const Stack = createNativeStackNavigator();
@@ -33,6 +35,7 @@ export default function App() {
         <Stack.Screen name="Complaints" component={ComplaintsScreen} />
         <Stack.Screen name="Committee" component={CommitteeScreen} />
         <Stack.Screen name="Members" component={MembersScreen} />
+        <Stack.Screen name="FileComplaint" component={FileComplaintScreen} />
         
         </Stack.Navigator>
     </NavigationContainer>
