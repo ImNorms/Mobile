@@ -12,6 +12,7 @@ import ComplaintsScreen from "./ComplaintsScreen";
 import CommitteeScreen from "./CommitteeScreen";
 import MembersScreen from "./MembersScreen";
 import FileComplaintScreen from "./FileComplaintScreen";
+import ProfileScreen from "./ProfileScreen";
 
 
 
@@ -24,18 +25,14 @@ export default function App() {
         <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
         <Stack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
         <Stack.Screen name="Announcement" component={AnnouncementScreen} />
-       <Stack.Screen name="EventCalendar">
-              {props => {
-          console.log("📅 EventCalendar screen is mounting...");
-              return <EventCalendarScreen {...props} />;
-                                      }}
-                            </Stack.Screen>
+     <Stack.Screen name="EventCalendar" component={EventCalendarScreen} />  
 
         <Stack.Screen name="Accounting" component={AccountingScreen} />
         <Stack.Screen name="Complaints" component={ComplaintsScreen} />
         <Stack.Screen name="Committee" component={CommitteeScreen} />
         <Stack.Screen name="Members" component={MembersScreen} />
         <Stack.Screen name="FileComplaint" component={FileComplaintScreen} />
+        <Stack.Screen name="Profile" component={ProfileScreen} />
         
         </Stack.Navigator>
     </NavigationContainer>
