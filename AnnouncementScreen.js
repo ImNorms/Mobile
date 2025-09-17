@@ -28,6 +28,7 @@ import {
   where,
   getCountFromServer,
 } from "firebase/firestore";
+import { getStorage, ref, getDownloadURL } from "firebase/storage";
 import { getAuth } from "firebase/auth";
 import { db } from "./firebaseConfig";
 import { Ionicons } from "@expo/vector-icons";
@@ -40,9 +41,13 @@ export default function AnnouncementScreen({ navigation }) {
   const [reacts, setReacts] = useState({});
   const [commentCounts, setCommentCounts] = useState({});
   const [selectedPost, setSelectedPost] = useState(null);
+  const [imageErrors, setImageErrors] = useState({});
+  const [imageLoadingStates, setImageLoadingStates] = useState({});
+  const [imageDimensions, setImageDimensions] = useState({}); // New state for image dimensions
 
   const auth = getAuth();
   const currentUser = auth.currentUser;
+  const storage = getStorage();
 
   const adminUIDs = ["ADMIN_UID_1", "ADMIN_UID_2"];
 
@@ -56,82 +61,6 @@ export default function AnnouncementScreen({ navigation }) {
       return 0;
     }
   };
-
-  useEffect(() => {
-    const postsQuery = query(collection(db, "posts"), orderBy("createdAt", "desc"));
-
-    const unsubscribePosts = onSnapshot(
-      postsQuery,
-      async (snapshot) => {
-        const postsData = snapshot.docs.map((docSnap) => {
-          const data = docSnap.data();
-          return {
-            id: docSnap.id,
-            ...data,
-            title: data.content || "No title",
-            description: data.content || "No description",
-            author: { name: data.authorName || "HOA Member" },
-            createdAt: data.createdAt,
-            imageUrl: data.imageUrl || "",
-            category: data.category || "announcement",
-            reactsCount: data.reactsCount || 0,
-            commentsCount: data.commentsCount || 0,
-          };
-        });
-
-        setPosts(postsData);
-        setLoading(false);
-
-        const counts = {};
-        for (const post of postsData) {
-          counts[post.id] = await getCommentCount(post.id);
-        }
-        setCommentCounts(counts);
-
-        postsData.forEach((post) => {
-          const commentsQuery = query(
-            collection(db, "posts", post.id, "comments"),
-            orderBy("createdAt", "asc")
-          );
-
-          onSnapshot(commentsQuery, (commentsSnapshot) => {
-            const postComments = commentsSnapshot.docs.map((commentDoc) => {
-              const commentData = commentDoc.data();
-              return {
-                id: commentDoc.id,
-                text: commentData.text || commentData.content || "",
-                user: commentData.authorName || commentData.user || commentData.userName || "Anonymous",
-                isAdmin: commentData.isAdmin || false,
-                createdAt: commentData.createdAt,
-                ...commentData,
-              };
-            });
-            setComments((prev) => ({ ...prev, [post.id]: postComments }));
-
-            setCommentCounts((prev) => ({
-              ...prev,
-              [post.id]: commentsSnapshot.size,
-            }));
-          });
-
-          const reactsQuery = query(collection(db, "posts", post.id, "reacts"));
-          onSnapshot(reactsQuery, (reactsSnapshot) => {
-            const postReacts = reactsSnapshot.docs.map((reactDoc) => ({
-              id: reactDoc.id,
-              ...reactDoc.data(),
-            }));
-            setReacts((prev) => ({ ...prev, [post.id]: postReacts }));
-          });
-        });
-      },
-      (error) => {
-        console.error("Error fetching posts:", error);
-        setLoading(false);
-      }
-    );
-
-    return () => unsubscribePosts();
-  }, []);
 
   const hasUserReacted = (postId) => {
     return reacts[postId]?.some((react) => react.userId === currentUser?.uid) || false;
@@ -193,6 +122,113 @@ export default function AnnouncementScreen({ navigation }) {
     }
   };
 
+  const handleImageError = (postId, error) => {
+    setImageErrors((prev) => ({ ...prev, [postId]: true }));
+    setImageLoadingStates((prev) => ({ ...prev, [postId]: false }));
+  };
+
+  const handleImageLoad = (postId, event) => {
+    const { width, height } = event.nativeEvent.source;
+    setImageDimensions((prev) => ({ ...prev, [postId]: { width, height } }));
+    setImageLoadingStates((prev) => ({ ...prev, [postId]: false }));
+  };
+
+  const handleImageLoadStart = (postId) => {
+    setImageLoadingStates((prev) => ({ ...prev, [postId]: true }));
+  };
+
+  // Calculate image height to maintain aspect ratio
+  const calculateImageHeight = (postId, containerWidth = 350) => {
+    const dimensions = imageDimensions[postId];
+    if (!dimensions) return 200; // Default height
+
+    const aspectRatio = dimensions.width / dimensions.height;
+    const calculatedHeight = containerWidth / aspectRatio;
+    
+    // Set reasonable min and max heights
+    return Math.min(Math.max(calculatedHeight, 150), 400);
+  };
+
+  useEffect(() => {
+    const postsQuery = query(collection(db, "posts"), orderBy("createdAt", "desc"));
+
+    const unsubscribePosts = onSnapshot(
+      postsQuery,
+      async (snapshot) => {
+        const postsData = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data();
+          
+          // Use mediaUrl instead of imageUrl (based on your logs)
+          const imageUrl = data.mediaUrl || data.imageUrl || "";
+          
+          return {
+            id: docSnap.id,
+            ...data,
+            title: data.content || "No title",
+            description: data.content || "No description",
+            author: { name: data.authorName || "HOA Member" },
+            createdAt: data.createdAt,
+            imageUrl: imageUrl, // This is the key change - use mediaUrl
+            category: data.category || "announcement",
+            reactsCount: data.reactsCount || 0,
+            commentsCount: data.commentsCount || 0,
+          };
+        });
+
+        setPosts(postsData);
+        setLoading(false);
+
+        const counts = {};
+        for (const post of postsData) {
+          counts[post.id] = await getCommentCount(post.id);
+        }
+        setCommentCounts(counts);
+
+        postsData.forEach((post) => {
+          const commentsQuery = query(
+            collection(db, "posts", post.id, "comments"),
+            orderBy("createdAt", "asc")
+          );
+
+          onSnapshot(commentsQuery, (commentsSnapshot) => {
+            const postComments = commentsSnapshot.docs.map((commentDoc) => {
+              const commentData = commentDoc.data();
+              return {
+                id: commentDoc.id,
+                text: commentData.text || commentData.content || "",
+                user: commentData.authorName || commentData.user || commentData.userName || "Anonymous",
+                isAdmin: commentData.isAdmin || false,
+                createdAt: commentData.createdAt,
+                ...commentData,
+              };
+            });
+            setComments((prev) => ({ ...prev, [post.id]: postComments }));
+
+            setCommentCounts((prev) => ({
+              ...prev,
+              [post.id]: commentsSnapshot.size,
+            }));
+          });
+
+          const reactsQuery = query(collection(db, "posts", post.id, "reacts"));
+          onSnapshot(reactsQuery, (reactsSnapshot) => {
+            const postReacts = reactsSnapshot.docs.map((reactDoc) => ({
+              id: reactDoc.id,
+              ...reactDoc.data(),
+            }));
+            setReacts((prev) => ({ ...prev, [post.id]: postReacts }));
+          });
+        });
+      },
+      (error) => {
+        console.error("Error fetching posts:", error);
+        setLoading(false);
+      }
+    );
+
+    return () => unsubscribePosts();
+  }, []);
+
   const renderItem = ({ item }) => (
     <View style={styles.postContainer}>
       <View style={styles.postHeader}>
@@ -218,9 +254,51 @@ export default function AnnouncementScreen({ navigation }) {
         <Text style={styles.postTitle}>{item.title}</Text>
         <Text style={styles.postDescription}>{item.description}</Text>
 
-        {item.imageUrl ? (
-          <Image source={{ uri: item.imageUrl }} style={styles.postImage} />
+        {item.imageUrl && !imageErrors[item.id] && item.imageUrl.trim() !== '' && !item.imageUrl.includes('via.placeholder.com') ? (
+          <View style={styles.imageContainer}>
+            {imageLoadingStates[item.id] && (
+              <View style={[styles.imageLoader, { height: calculateImageHeight(item.id) }]}>
+                <ActivityIndicator size="large" color="#007AFF" />
+                <Text style={styles.loadingText}>Loading image...</Text>
+              </View>
+            )}
+            <Image 
+              source={{ 
+                uri: item.imageUrl,
+                // Add cache control headers
+                cache: 'force-cache'
+              }} 
+              style={[
+                styles.postImage,
+                { 
+                  height: calculateImageHeight(item.id),
+                  minHeight: 150,
+                }
+              ]}
+              resizeMode="contain"
+              onLoadStart={() => handleImageLoadStart(item.id)}
+              onLoad={(event) => handleImageLoad(item.id, event)}
+              onError={(error) => handleImageError(item.id, error)}
+            />
+          </View>
         ) : null}
+        
+        {imageErrors[item.id] && (
+          <View style={styles.imageError}>
+            <Ionicons name="image-outline" size={40} color="#ccc" />
+            <Text style={styles.imageErrorText}>Image failed to load</Text>
+            <TouchableOpacity 
+              style={styles.retryButton}
+              onPress={() => {
+                // Reset error state and try loading again
+                setImageErrors(prev => ({ ...prev, [item.id]: false }));
+                setImageLoadingStates(prev => ({ ...prev, [item.id]: true }));
+              }}
+            >
+              <Text style={styles.retryButtonText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
 
       <View style={styles.postStats}>
@@ -403,7 +481,41 @@ const styles = StyleSheet.create({
   postContent: { marginVertical: 8 },
   postTitle: { fontSize: 16, fontWeight: "bold", marginBottom: 4 },
   postDescription: { fontSize: 14, color: "#444" },
-  postImage: { width: "100%", height: 200, borderRadius: 8, marginTop: 8 },
+  imageContainer: {
+    position: 'relative',
+    marginTop: 8,
+    backgroundColor: '#f9f9f9', // Light background for better contrast
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  postImage: { 
+    width: "100%",
+    borderRadius: 8,
+  },
+  imageLoader: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1,
+    backgroundColor: '#f9f9f9',
+  },
+  imageError: {
+    height: 200,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f9f9f9',
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  imageErrorText: {
+    marginTop: 8,
+    color: '#999',
+    fontSize: 14,
+  },
   postStats: { flexDirection: "row", justifyContent: "space-between", marginVertical: 6 },
   statText: { fontSize: 14, color: "#666" },
   postActions: { flexDirection: "row", justifyContent: "space-around", marginTop: 6 },
@@ -445,6 +557,23 @@ const styles = StyleSheet.create({
     height: 40,
     justifyContent: "center",
     alignItems: "center",
+  },
+  retryButton: {
+    marginTop: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#007AFF',
+    borderRadius: 4,
+  },
+  retryButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  debugText: {
+    fontSize: 10,
+    color: '#999',
+    marginTop: 4,
   },
   footer: {
     flexDirection: "row",

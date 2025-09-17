@@ -13,6 +13,7 @@ import CommitteeScreen from "./CommitteeScreen";
 import MembersScreen from "./MembersScreen";
 import FileComplaintScreen from "./FileComplaintScreen";
 import ProfileScreen from "./ProfileScreen";
+import VotingScreen from "./VotingScreen";
 
 
 
@@ -25,8 +26,8 @@ export default function App() {
         <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
         <Stack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
         <Stack.Screen name="Announcement" component={AnnouncementScreen} />
-     <Stack.Screen name="EventCalendar" component={EventCalendarScreen} />  
-
+        <Stack.Screen name="EventCalendar" component={EventCalendarScreen} />  
+        <Stack.Screen name="Voting" component={VotingScreen} />
         <Stack.Screen name="Accounting" component={AccountingScreen} />
         <Stack.Screen name="Complaints" component={ComplaintsScreen} />
         <Stack.Screen name="Committee" component={CommitteeScreen} />

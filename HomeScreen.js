@@ -86,24 +86,34 @@ export default function HomeScreen({ navigation }) {
             <Text style={styles.cardText}>Members</Text>
             <Text style={styles.smallText}>View all</Text>
           </TouchableOpacity>
+
+          {/* ✅ New Voting Button */}
+          <TouchableOpacity
+            style={[styles.card, { backgroundColor: "#2C3E50" }]}
+            onPress={() => navigation.navigate("Voting")}
+          >
+            <Ionicons name="checkmark-circle" size={28} color="#fff" />
+            <Text style={styles.cardText}>Voting</Text>
+            <Text style={styles.smallText}>Vote now</Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
 
-    {/* Footer Nav */}
-  <View style={styles.footer}>
-  <TouchableOpacity onPress={() => navigation.navigate("Profile")}>
-    <Ionicons name="person-circle" size={22} color="#fff" />
-    <Text style={styles.footerText}>Account</Text>
-  </TouchableOpacity>
-  <TouchableOpacity>
-    <Ionicons name="home" size={22} color="#fff" />
-    <Text style={styles.footerText}>Home</Text>
-  </TouchableOpacity>
-  <TouchableOpacity onPress={() => navigation.replace("Login")}>
-    <Ionicons name="log-out" size={22} color="#fff" />
-    <Text style={styles.footerText}>Log out</Text>
-  </TouchableOpacity>
-  </View>
+      {/* Footer Nav */}
+      <View style={styles.footer}>
+        <TouchableOpacity onPress={() => navigation.navigate("Profile")}>
+          <Ionicons name="person-circle" size={22} color="#fff" />
+          <Text style={styles.footerText}>Account</Text>
+        </TouchableOpacity>
+        <TouchableOpacity>
+          <Ionicons name="home" size={22} color="#fff" />
+          <Text style={styles.footerText}>Home</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation.replace("Login")}>
+          <Ionicons name="log-out" size={22} color="#fff" />
+          <Text style={styles.footerText}>Log out</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
