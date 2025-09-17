@@ -11,67 +11,63 @@ import {
 import { db } from "./firebaseConfig";
 import {
   collection,
-  getDocs,
   doc,
   setDoc,
   serverTimestamp,
   deleteDoc,
-  query,
-  where,
+  onSnapshot,
 } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 
 export default function VotingScreen() {
   const [candidates, setCandidates] = useState({});
-  const [userVotes, setUserVotes] = useState({}); // track user’s votes
+  const [userVotes, setUserVotes] = useState({});
   const [loading, setLoading] = useState(true);
   const auth = getAuth();
 
-  // Fetch candidates and group by position
+  // ✅ Fetch candidates and listen for real-time updates
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const querySnapshot = await getDocs(collection(db, "candidates"));
+    const unsubscribeCandidates = onSnapshot(
+      collection(db, "candidates"),
+      async (querySnapshot) => {
         const grouped = {};
+        const user = auth.currentUser;
+        const votes = {};
+
+        // Loop through candidates
         querySnapshot.forEach((docSnap) => {
           const data = { id: docSnap.id, ...docSnap.data() };
           if (!grouped[data.position]) grouped[data.position] = [];
-          grouped[data.position].push(data);
-        });
-        setCandidates(grouped);
 
-        // Fetch current user votes
-        const user = auth.currentUser;
-        if (user) {
-          const votes = {};
-          for (const position of Object.keys(grouped)) {
-            const q = query(
-              collection(db, "candidates"),
-              where("position", "==", position)
+          // ✅ Listen to votes subcollection in real time
+          onSnapshot(collection(db, "candidates", data.id, "votes"), (voteSnap) => {
+            const voteCount = voteSnap.size;
+            grouped[data.position] = grouped[data.position].map((c) =>
+              c.id === data.id ? { ...c, voteCount } : c
             );
-            const snapshot = await getDocs(q);
-            for (const candidateDoc of snapshot.docs) {
-              const voteSnap = await getDocs(
-                collection(db, `candidates/${candidateDoc.id}/votes`)
-              );
-              if (voteSnap.docs.find((d) => d.id === user.uid)) {
-                votes[position] = candidateDoc.id;
-              }
+
+            // Check if this user voted for this candidate
+            if (user && voteSnap.docs.find((d) => d.id === user.uid)) {
+              votes[data.position] = data.id;
             }
-          }
-          setUserVotes(votes);
-        }
-      } catch (error) {
-        console.error("Error fetching candidates or votes: ", error);
-      } finally {
+
+            setCandidates({ ...grouped });
+            setUserVotes(votes);
+          });
+
+          grouped[data.position].push({ ...data, voteCount: 0 });
+        });
+
+        setCandidates(grouped);
+        setUserVotes(votes);
         setLoading(false);
       }
-    };
+    );
 
-    fetchData();
+    return () => unsubscribeCandidates();
   }, []);
 
-  // Handle voting per category (position)
+  // Handle voting
   const handleVote = async (candidateId, position) => {
     try {
       const user = auth.currentUser;
@@ -80,7 +76,7 @@ export default function VotingScreen() {
         return;
       }
 
-      // If the user already voted in this position, remove old vote
+      // If user already voted in this position, remove old vote
       if (userVotes[position] && userVotes[position] !== candidateId) {
         const oldVoteRef = doc(
           db,
@@ -149,7 +145,7 @@ export default function VotingScreen() {
                     <Text style={styles.term}>Term: {item.termDuration}</Text>
                     <Text style={styles.contact}>Contact: {item.contactNo}</Text>
 
-                    {/* ✅ Vote Count */}
+                    {/* ✅ Real-time Vote Count */}
                     <Text style={styles.voteCount}>
                       Votes: {item.voteCount ?? 0}
                     </Text>
