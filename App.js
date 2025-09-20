@@ -14,8 +14,9 @@ import MembersScreen from "./MembersScreen";
 import FileComplaintScreen from "./FileComplaintScreen";
 import ProfileScreen from "./ProfileScreen";
 import VotingScreen from "./VotingScreen";
-
-
+import ElectionsScreen from "./ElectionsScreen";
+import ElectionStatusScreen from "./ElectionStatusScreen";
+import ViewMyVotesScreen from "./ViewMyVotesScreen";
 
 const Stack = createNativeStackNavigator();
 
@@ -34,6 +35,9 @@ export default function App() {
         <Stack.Screen name="Members" component={MembersScreen} />
         <Stack.Screen name="FileComplaint" component={FileComplaintScreen} />
         <Stack.Screen name="Profile" component={ProfileScreen} />
+        <Stack.Screen name="Elections" component={ElectionsScreen} />
+        <Stack.Screen name="ElectionStatus" component={ElectionStatusScreen} />
+        <Stack.Screen name="MyVotes" component={ViewMyVotesScreen} />
         
         </Stack.Navigator>
     </NavigationContainer>

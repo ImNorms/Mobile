@@ -1,213 +1,125 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import {
   View,
   Text,
-  FlatList,
   TouchableOpacity,
-  Image,
   StyleSheet,
-  ActivityIndicator,
+  SafeAreaView,
 } from "react-native";
-import { db } from "./firebaseConfig";
-import {
-  collection,
-  doc,
-  setDoc,
-  serverTimestamp,
-  deleteDoc,
-  onSnapshot,
-} from "firebase/firestore";
-import { getAuth } from "firebase/auth";
+import { Ionicons } from "@expo/vector-icons";
 
-export default function VotingScreen() {
-  const [candidates, setCandidates] = useState({});
-  const [userVotes, setUserVotes] = useState({});
-  const [loading, setLoading] = useState(true);
-  const auth = getAuth();
+// Replace this with the actual ID of your election event
+const ELECTION_EVENT_ID = "wzGxQO9evW5Pm5DMVrOp";
 
-  // ✅ Fetch candidates and listen for real-time updates
-  useEffect(() => {
-    const unsubscribeCandidates = onSnapshot(
-      collection(db, "candidates"),
-      async (querySnapshot) => {
-        const grouped = {};
-        const user = auth.currentUser;
-        const votes = {};
-
-        // Loop through candidates
-        querySnapshot.forEach((docSnap) => {
-          const data = { id: docSnap.id, ...docSnap.data() };
-          if (!grouped[data.position]) grouped[data.position] = [];
-
-          // ✅ Listen to votes subcollection in real time
-          onSnapshot(collection(db, "candidates", data.id, "votes"), (voteSnap) => {
-            const voteCount = voteSnap.size;
-            grouped[data.position] = grouped[data.position].map((c) =>
-              c.id === data.id ? { ...c, voteCount } : c
-            );
-
-            // Check if this user voted for this candidate
-            if (user && voteSnap.docs.find((d) => d.id === user.uid)) {
-              votes[data.position] = data.id;
-            }
-
-            setCandidates({ ...grouped });
-            setUserVotes(votes);
-          });
-
-          grouped[data.position].push({ ...data, voteCount: 0 });
-        });
-
-        setCandidates(grouped);
-        setUserVotes(votes);
-        setLoading(false);
-      }
-    );
-
-    return () => unsubscribeCandidates();
-  }, []);
-
-  // Handle voting
-  const handleVote = async (candidateId, position) => {
-    try {
-      const user = auth.currentUser;
-      if (!user) {
-        alert("You must be logged in to vote.");
-        return;
-      }
-
-      // If user already voted in this position, remove old vote
-      if (userVotes[position] && userVotes[position] !== candidateId) {
-        const oldVoteRef = doc(
-          db,
-          "candidates",
-          userVotes[position],
-          "votes",
-          user.uid
-        );
-        await deleteDoc(oldVoteRef);
-      }
-
-      // Add new vote
-      const voteRef = doc(db, "candidates", candidateId, "votes", user.uid);
-      await setDoc(voteRef, {
-        userId: user.uid,
-        position,
-        timestamp: serverTimestamp(),
-      });
-
-      setUserVotes((prev) => ({ ...prev, [position]: candidateId }));
-      alert("Vote updated successfully!");
-    } catch (error) {
-      console.error("Error casting vote: ", error);
-      alert("Error casting vote.");
-    }
-  };
-
-  if (loading) {
-    return (
-      <View style={styles.loader}>
-        <ActivityIndicator size="large" color="#00695C" />
-      </View>
-    );
-  }
-
+export default function VotingScreen({ navigation }) {
   return (
-    <View style={styles.container}>
-      {Object.keys(candidates).map((position) => (
-        <View key={position} style={styles.section}>
-          <Text style={styles.sectionTitle}>{position}</Text>
-          <FlatList
-            data={candidates[position]}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => {
-              const isVoted = userVotes[position] === item.id;
-              return (
-                <View
-                  style={[
-                    styles.card,
-                    isVoted && { borderColor: "#2C3E50", borderWidth: 2 },
-                  ]}
-                >
-                  {/* Candidate Image */}
-                  {item.photoURL ? (
-                    <Image source={{ uri: item.photoURL }} style={styles.image} />
-                  ) : (
-                    <View style={styles.placeholderImage}>
-                      <Text style={styles.initial}>{item.name?.charAt(0)}</Text>
-                    </View>
-                  )}
+    <SafeAreaView style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Voting</Text>
+      </View>
 
-                  {/* Candidate Info */}
-                  <View style={styles.info}>
-                    <Text style={styles.name}>{item.name}</Text>
-                    <Text style={styles.email}>{item.email}</Text>
-                    <Text style={styles.term}>Term: {item.termDuration}</Text>
-                    <Text style={styles.contact}>Contact: {item.contactNo}</Text>
+      {/* Menu Cards */}
+      <View style={styles.menuContainer}>
+        {/* Election Status */}
+        <TouchableOpacity
+          style={[styles.card, { borderLeftColor: "#00695C" }]}
+          onPress={() =>
+            navigation.navigate("ElectionStatus", {
+              eventId: ELECTION_EVENT_ID, // pass eventId here
+            })
+          }
+        >
+          <View style={styles.cardContent}>
+            <Ionicons name="stats-chart" size={28} color="#00695C" />
+            <Text style={styles.cardText}>Election Status</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={24} color="#00695C" />
+        </TouchableOpacity>
 
-                    {/* ✅ Real-time Vote Count */}
-                    <Text style={styles.voteCount}>
-                      Votes: {item.voteCount ?? 0}
-                    </Text>
-                  </View>
+        {/* Board of Directors Election */}
+        <TouchableOpacity
+          style={[styles.card, { borderLeftColor: "#2E7D32" }]}
+          onPress={() => navigation.navigate("Elections")}
+        >
+          <View style={styles.cardContent}>
+            <Ionicons name="people" size={28} color="#2E7D32" />
+            <Text style={styles.cardText}>Board of Directors Election</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={24} color="#2E7D32" />
+        </TouchableOpacity>
 
-                  {/* Vote Button */}
-                  <TouchableOpacity
-                    style={[
-                      styles.voteButton,
-                      isVoted && { backgroundColor: "#27ae60" },
-                    ]}
-                    onPress={() => handleVote(item.id, item.position)}
-                  >
-                    <Text style={styles.voteText}>
-                      {isVoted ? "Voted" : "Vote"}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              );
-            }}
-          />
-        </View>
-      ))}
-    </View>
+        {/* View My Votes */}
+        <TouchableOpacity
+          style={[styles.card, { borderLeftColor: "#FBC02D" }]}
+          onPress={() => navigation.navigate("MyVotes")}
+        >
+          <View style={styles.cardContent}>
+            <Ionicons name="clipboard" size={28} color="#FBC02D" />
+            <Text style={styles.cardText}>View My Votes</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={24} color="#FBC02D" />
+        </TouchableOpacity>
+      </View>
+
+      {/* Bottom Navigation */}
+      <View style={styles.bottomNav}>
+        <TouchableOpacity
+          style={styles.navItem}
+          onPress={() => navigation.navigate("Profile")}
+        >
+          <Ionicons name="person-circle" size={22} color="#fff" />
+          <Text style={styles.navText}>Account</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.navItem}
+          onPress={() => navigation.navigate("Home")}
+        >
+          <Ionicons name="home" size={22} color="#fff" />
+          <Text style={styles.navText}>Home</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.navItem}
+          onPress={() => navigation.navigate("Login")}
+        >
+          <Ionicons name="log-out" size={22} color="#fff" />
+          <Text style={styles.navText}>Log out</Text>
+        </TouchableOpacity>
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f4f4f4", padding: 10 },
-  loader: { flex: 1, justifyContent: "center", alignItems: "center" },
-  section: { marginBottom: 20 },
-  sectionTitle: { fontSize: 18, fontWeight: "bold", marginBottom: 10 },
-  card: {
-    backgroundColor: "#fff",
-    borderRadius: 10,
-    marginBottom: 10,
-    padding: 10,
-    flexDirection: "row",
+  container: { flex: 1, backgroundColor: "#f4f4f4" },
+  header: {
+    backgroundColor: "#00695C",
+    padding: 15,
     alignItems: "center",
+  },
+  headerTitle: { fontSize: 18, fontWeight: "bold", color: "#fff" },
+  menuContainer: { flex: 1, padding: 10 },
+  card: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    borderRadius: 8,
+    padding: 15,
+    marginBottom: 12,
+    borderLeftWidth: 6,
     elevation: 2,
   },
-  image: { width: 60, height: 60, borderRadius: 30 },
-  placeholderImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: "#ccc",
-    justifyContent: "center",
-    alignItems: "center",
+  cardContent: { flexDirection: "row", alignItems: "center" },
+  cardText: { marginLeft: 10, fontSize: 15, fontWeight: "600", color: "#333" },
+  bottomNav: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    backgroundColor: "#00695C",
+    paddingVertical: 10,
   },
-  initial: { fontSize: 20, fontWeight: "bold", color: "#fff" },
-  info: { flex: 1, marginLeft: 15 },
-  name: { fontSize: 16, fontWeight: "bold" },
-  email: { fontSize: 12, color: "#777" },
-  term: { fontSize: 12, color: "#777" },
-  contact: { fontSize: 12, color: "#777" },
-  voteCount: { fontSize: 13, fontWeight: "bold", marginTop: 5, color: "#2C3E50" },
-  voteButton: {
-    backgroundColor: "#2C3E50",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 6,
-  },
-  voteText: { color: "#fff", fontWeight: "bold" },
+  navItem: { alignItems: "center" },
+  navText: { fontSize: 12, color: "#fff", marginTop: 2 },
 });
