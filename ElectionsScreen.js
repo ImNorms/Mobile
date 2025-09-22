@@ -31,15 +31,17 @@ export default function ElectionsScreen() {
   const auth = getAuth();
   const navigation = useNavigation();
 
-  // Fetch election data
+  // Fetch elections and candidates
   useEffect(() => {
-    const unsubscribe = onSnapshot(collection(db, "elections"), (snap) => {
+    const unsubscribeElections = onSnapshot(collection(db, "elections"), (snap) => {
       let grouped = {};
-      let eventFields = null;
       let firstEventId = null;
+      let eventFields = null;
 
       snap.forEach((docSnap) => {
-        firstEventId = docSnap.id;
+        // Only get the first election automatically
+        if (!firstEventId) firstEventId = docSnap.id;
+
         const data = docSnap.data();
 
         eventFields = {
@@ -50,27 +52,40 @@ export default function ElectionsScreen() {
           createdAt: data.createdAt,
         };
 
-        if (Array.isArray(data.candidates)) {
-          data.candidates.forEach((candidate, index) => {
-            if (!grouped[candidate.position]) grouped[candidate.position] = [];
-            grouped[candidate.position].push({
-              ...candidate,
-              id: candidate.id || `${docSnap.id}_${index}`,
+        const candidatesRef = collection(db, "elections", docSnap.id, "candidates");
+        onSnapshot(candidatesRef, (candidatesSnap) => {
+          let updatedGrouped = { ...grouped };
+
+          candidatesSnap.forEach((candidateDoc) => {
+            const candidateData = candidateDoc.data();
+            if (!updatedGrouped[candidateData.position]) {
+              updatedGrouped[candidateData.position] = [];
+            }
+
+            // Prevent duplicates
+            updatedGrouped[candidateData.position] = updatedGrouped[candidateData.position].filter(
+              (c) => c.id !== candidateDoc.id
+            );
+
+            updatedGrouped[candidateData.position].push({
+              ...candidateData,
+              id: candidateDoc.id,
             });
           });
-        }
+
+          setElections(updatedGrouped);
+        });
       });
 
-      setElections(grouped);
       setEventInfo(eventFields);
-      setEventId(firstEventId);
+      setEventId(firstEventId); // Save first election ID
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => unsubscribeElections();
   }, []);
 
-  // Submit votes dynamically
+  // Submit votes
   const handleSubmitAllVotes = async () => {
     try {
       const user = auth.currentUser;
@@ -84,43 +99,42 @@ export default function ElectionsScreen() {
         return;
       }
 
-      const positions = Object.keys(selectedChoices);
-      if (positions.length === 0) {
+      if (Object.keys(selectedChoices).length === 0) {
         alert("Please select at least one candidate before submitting.");
         return;
       }
 
-      const voteRef = doc(db, "elections", eventId, "votes", user.uid);
+      const voteDocId = `${eventId}_${user.uid}`;
+      const voteRef = doc(db, "votes", voteDocId);
       const existingVote = await getDoc(voteRef);
       if (existingVote.exists()) {
         alert("⚠️ You have already submitted your vote.");
         return;
       }
 
-      // Map selected candidate IDs to their names dynamically
-      const votesByName = {};
-      positions.forEach((position) => {
+      const votesByCandidate = {};
+      Object.keys(selectedChoices).forEach((position) => {
         const candidateId = selectedChoices[position];
-        const candidate = elections[position].find((c) => c.id === candidateId);
-        if (candidate) {
-          votesByName[position] = candidate.name; // or candidate.id if you prefer saving ID
+        if (candidateId) {
+          votesByCandidate[position] = { candidateId, votedAt: serverTimestamp() };
         }
       });
 
       await setDoc(voteRef, {
         userId: user.uid,
-        choices: votesByName,
-        timestamp: serverTimestamp(),
+        eventId: eventId,
+        votes: votesByCandidate,
       });
 
       alert("✅ Your votes have been submitted!");
 
+      // Navigate to ElectionStatus with dynamic first election ID
       navigation.navigate("ElectionStatus", {
         eventId: eventId,
-        choices: votesByName,
+        votes: votesByCandidate,
       });
     } catch (error) {
-      console.error("Error submitting votes: ", error);
+      console.error("Error submitting votes:", error);
       alert("Error submitting votes.");
     }
   };
@@ -139,9 +153,7 @@ export default function ElectionsScreen() {
         {eventInfo && (
           <View style={styles.eventCard}>
             <Text style={styles.eventTitle}>{eventInfo.title}</Text>
-            {eventInfo.date && (
-              <Text style={styles.eventDetail}>📅 Date: {eventInfo.date}</Text>
-            )}
+            {eventInfo.date && <Text style={styles.eventDetail}>📅 Date: {eventInfo.date}</Text>}
             {eventInfo.startTime && eventInfo.endTime && (
               <Text style={styles.eventDetail}>
                 🕒 Time: {eventInfo.startTime} - {eventInfo.endTime}
@@ -173,20 +185,13 @@ export default function ElectionsScreen() {
                           const updated = { ...prev };
                           delete updated[position];
                           return updated;
-                        } else {
-                          return {
-                            ...prev,
-                            [position]: item.id,
-                          };
                         }
+                        return { ...prev, [position]: item.id };
                       })
                     }
                   >
                     {item.photoURL ? (
-                      <Image
-                        source={{ uri: item.photoURL }}
-                        style={styles.image}
-                      />
+                      <Image source={{ uri: item.photoURL }} style={styles.image} />
                     ) : (
                       <View style={styles.placeholderImage}>
                         <Text style={styles.initial}>{item.name?.charAt(0)}</Text>
@@ -196,9 +201,7 @@ export default function ElectionsScreen() {
                     <View style={styles.info}>
                       <Text style={styles.name}>{item.name}</Text>
                       <Text style={styles.term}>Position: {item.position}</Text>
-                      {item.termDuration && (
-                        <Text style={styles.term}>Term: {item.termDuration}</Text>
-                      )}
+                      {item.termDuration && <Text style={styles.term}>Term: {item.termDuration}</Text>}
                     </View>
 
                     <Text style={styles.radio}>{isSelected ? "🔘" : "⚪"}</Text>
@@ -209,10 +212,7 @@ export default function ElectionsScreen() {
           </View>
         ))}
 
-        <TouchableOpacity
-          style={styles.submitButton}
-          onPress={handleSubmitAllVotes}
-        >
+        <TouchableOpacity style={styles.submitButton} onPress={handleSubmitAllVotes}>
           <Text style={styles.submitText}>Submit All Votes</Text>
         </TouchableOpacity>
       </ScrollView>
@@ -224,48 +224,20 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f4f4f4", padding: 10 },
   loader: { flex: 1, justifyContent: "center", alignItems: "center" },
 
-  eventCard: {
-    backgroundColor: "#fff",
-    padding: 15,
-    borderRadius: 10,
-    marginBottom: 20,
-    elevation: 3,
-  },
+  eventCard: { backgroundColor: "#fff", padding: 15, borderRadius: 10, marginBottom: 20, elevation: 3 },
   eventTitle: { fontSize: 20, fontWeight: "bold", marginBottom: 5 },
   eventDetail: { fontSize: 14, color: "#555", marginBottom: 3 },
 
   section: { marginBottom: 25 },
   sectionTitle: { fontSize: 18, fontWeight: "bold", marginBottom: 10 },
-  card: {
-    backgroundColor: "#fff",
-    borderRadius: 10,
-    marginBottom: 10,
-    padding: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    elevation: 2,
-  },
+  card: { backgroundColor: "#fff", borderRadius: 10, marginBottom: 10, padding: 10, flexDirection: "row", alignItems: "center", elevation: 2 },
   image: { width: 60, height: 60, borderRadius: 30 },
-  placeholderImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: "#ccc",
-    justifyContent: "center",
-    alignItems: "center",
-  },
+  placeholderImage: { width: 60, height: 60, borderRadius: 30, backgroundColor: "#ccc", justifyContent: "center", alignItems: "center" },
   initial: { fontSize: 20, fontWeight: "bold", color: "#fff" },
   info: { flex: 1, marginLeft: 15 },
   name: { fontSize: 16, fontWeight: "bold" },
   term: { fontSize: 12, color: "#777" },
   radio: { fontSize: 20, marginLeft: 10 },
-  submitButton: {
-    backgroundColor: "#2C3E50",
-    paddingVertical: 14,
-    borderRadius: 10,
-    alignItems: "center",
-    marginTop: 20,
-    marginBottom: 30,
-  },
+  submitButton: { backgroundColor: "#2C3E50", paddingVertical: 14, borderRadius: 10, alignItems: "center", marginTop: 20, marginBottom: 30 },
   submitText: { color: "#fff", fontWeight: "bold", fontSize: 16 },
 });

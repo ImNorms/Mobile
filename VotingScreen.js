@@ -1,33 +1,36 @@
-import React from "react";
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  SafeAreaView,
-} from "react-native";
+import React, { useEffect, useState } from "react";
+import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-
-// Replace this with the actual ID of your election event
-const ELECTION_EVENT_ID = "wzGxQO9evW5Pm5DMVrOp";
+import { db } from "./firebaseConfig";
+import { collection, onSnapshot } from "firebase/firestore";
 
 export default function VotingScreen({ navigation }) {
+  const [firstElectionId, setFirstElectionId] = useState(null);
+
+  useEffect(() => {
+    // Listen for elections and get the first one
+    const unsubscribe = onSnapshot(collection(db, "elections"), (snap) => {
+      if (!snap.empty) {
+        setFirstElectionId(snap.docs[0].id);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Voting</Text>
       </View>
 
-      {/* Menu Cards */}
       <View style={styles.menuContainer}>
         {/* Election Status */}
         <TouchableOpacity
           style={[styles.card, { borderLeftColor: "#00695C" }]}
           onPress={() =>
-            navigation.navigate("ElectionStatus", {
-              eventId: ELECTION_EVENT_ID, // pass eventId here
-            })
+            firstElectionId &&
+            navigation.navigate("ElectionStatus", { eventId: firstElectionId })
           }
         >
           <View style={styles.cardContent}>
@@ -40,7 +43,9 @@ export default function VotingScreen({ navigation }) {
         {/* Board of Directors Election */}
         <TouchableOpacity
           style={[styles.card, { borderLeftColor: "#2E7D32" }]}
-          onPress={() => navigation.navigate("Elections")}
+          onPress={() =>
+            firstElectionId && navigation.navigate("Elections", { eventId: firstElectionId })
+          }
         >
           <View style={styles.cardContent}>
             <Ionicons name="people" size={28} color="#2E7D32" />
@@ -52,7 +57,9 @@ export default function VotingScreen({ navigation }) {
         {/* View My Votes */}
         <TouchableOpacity
           style={[styles.card, { borderLeftColor: "#FBC02D" }]}
-          onPress={() => navigation.navigate("MyVotes")}
+          onPress={() =>
+            firstElectionId && navigation.navigate("MyVotes", { eventId: firstElectionId })
+          }
         >
           <View style={styles.cardContent}>
             <Ionicons name="clipboard" size={28} color="#FBC02D" />
@@ -61,44 +68,13 @@ export default function VotingScreen({ navigation }) {
           <Ionicons name="chevron-forward" size={24} color="#FBC02D" />
         </TouchableOpacity>
       </View>
-
-      {/* Bottom Navigation */}
-      <View style={styles.bottomNav}>
-        <TouchableOpacity
-          style={styles.navItem}
-          onPress={() => navigation.navigate("Profile")}
-        >
-          <Ionicons name="person-circle" size={22} color="#fff" />
-          <Text style={styles.navText}>Account</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.navItem}
-          onPress={() => navigation.navigate("Home")}
-        >
-          <Ionicons name="home" size={22} color="#fff" />
-          <Text style={styles.navText}>Home</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.navItem}
-          onPress={() => navigation.navigate("Login")}
-        >
-          <Ionicons name="log-out" size={22} color="#fff" />
-          <Text style={styles.navText}>Log out</Text>
-        </TouchableOpacity>
-      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f4f4f4" },
-  header: {
-    backgroundColor: "#00695C",
-    padding: 15,
-    alignItems: "center",
-  },
+  header: { backgroundColor: "#00695C", padding: 15, alignItems: "center" },
   headerTitle: { fontSize: 18, fontWeight: "bold", color: "#fff" },
   menuContainer: { flex: 1, padding: 10 },
   card: {
@@ -114,12 +90,4 @@ const styles = StyleSheet.create({
   },
   cardContent: { flexDirection: "row", alignItems: "center" },
   cardText: { marginLeft: 10, fontSize: 15, fontWeight: "600", color: "#333" },
-  bottomNav: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    backgroundColor: "#00695C",
-    paddingVertical: 10,
-  },
-  navItem: { alignItems: "center" },
-  navText: { fontSize: 12, color: "#fff", marginTop: 2 },
 });
