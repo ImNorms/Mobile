@@ -7,7 +7,8 @@ import {
   TouchableOpacity, 
   StyleSheet, 
   Image, 
-  Alert 
+  Alert,
+  ActivityIndicator
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -18,6 +19,7 @@ import { signInWithEmailAndPassword } from 'firebase/auth';
 export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
 
   // ✅ Login with Firebase
   const handleLogin = async () => {
@@ -26,6 +28,7 @@ export default function LoginScreen({ navigation }) {
       return;
     }
 
+    setLoading(true); // start loading
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       console.log("Logged in:", userCredential.user.email);
@@ -33,8 +36,21 @@ export default function LoginScreen({ navigation }) {
       // Navigate to Home screen with user info
       navigation.replace("Home", { userEmail: userCredential.user.email });
     } catch (error) {
-      console.error("Login error:", error.message);
-      Alert.alert("Login Failed", error.message);
+      console.error("Login error:", error.code);
+
+      let message = "Login failed. Please try again.";
+
+      if (error.code === "auth/invalid-email") {
+        message = "Invalid email format.";
+      } else if (error.code === "auth/user-not-found") {
+        message = "No account found with this email.";
+      } else if (error.code === "auth/wrong-password") {
+        message = "Incorrect password.";
+      }
+
+      Alert.alert("Login Failed", message);
+    } finally {
+      setLoading(false); // stop loading
     }
   };
 
@@ -85,8 +101,16 @@ export default function LoginScreen({ navigation }) {
         <Text style={styles.forgotPassword}>Forgot password?</Text>
 
         {/* Login Button */}
-        <TouchableOpacity style={styles.button} onPress={handleLogin}>
-          <Text style={styles.buttonText}>Login</Text>
+        <TouchableOpacity 
+          style={[styles.button, loading && { backgroundColor: "#ccc" }]} 
+          onPress={handleLogin}
+          disabled={loading}
+        >
+          {loading ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <Text style={styles.buttonText}>Login</Text>
+          )}
         </TouchableOpacity>
       </View>
     </View>

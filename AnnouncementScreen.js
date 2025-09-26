@@ -28,7 +28,7 @@ import {
   where,
   getCountFromServer,
 } from "firebase/firestore";
-import { getStorage, ref, getDownloadURL } from "firebase/storage";
+import { getStorage } from "firebase/storage";
 import { getAuth } from "firebase/auth";
 import { db } from "./firebaseConfig";
 import { Ionicons } from "@expo/vector-icons";
@@ -43,7 +43,9 @@ export default function AnnouncementScreen({ navigation }) {
   const [selectedPost, setSelectedPost] = useState(null);
   const [imageErrors, setImageErrors] = useState({});
   const [imageLoadingStates, setImageLoadingStates] = useState({});
-  const [imageDimensions, setImageDimensions] = useState({}); // New state for image dimensions
+  const [imageDimensions, setImageDimensions] = useState({});
+  const [editingComment, setEditingComment] = useState(null);
+  const [editText, setEditText] = useState("");
 
   const auth = getAuth();
   const currentUser = auth.currentUser;
@@ -63,7 +65,9 @@ export default function AnnouncementScreen({ navigation }) {
   };
 
   const hasUserReacted = (postId) => {
-    return reacts[postId]?.some((react) => react.userId === currentUser?.uid) || false;
+    return (
+      reacts[postId]?.some((react) => react.userId === currentUser?.uid) || false
+    );
   };
 
   const toggleLike = async (postId) => {
@@ -71,7 +75,10 @@ export default function AnnouncementScreen({ navigation }) {
 
     try {
       const reactsRef = collection(db, "posts", postId, "reacts");
-      const userReactQuery = query(reactsRef, where("userId", "==", currentUser.uid));
+      const userReactQuery = query(
+        reactsRef,
+        where("userId", "==", currentUser.uid)
+      );
 
       const snapshot = await getDocs(userReactQuery);
 
@@ -84,7 +91,9 @@ export default function AnnouncementScreen({ navigation }) {
           createdAt: serverTimestamp(),
           type: "like",
         });
-        await updateDoc(postRef, { reactsCount: (currentPost?.reactsCount || 0) + 1 });
+        await updateDoc(postRef, {
+          reactsCount: (currentPost?.reactsCount || 0) + 1,
+        });
       } else {
         const reactDoc = snapshot.docs[0];
         await deleteDoc(doc(db, "posts", postId, "reacts", reactDoc.id));
@@ -114,11 +123,43 @@ export default function AnnouncementScreen({ navigation }) {
       });
 
       const postRef = doc(db, "posts", postId);
-      await updateDoc(postRef, { commentsCount: (currentCommentsCount || 0) + 1 });
+      await updateDoc(postRef, {
+        commentsCount: (currentCommentsCount || 0) + 1,
+      });
 
       setCommentTexts((prev) => ({ ...prev, [postId]: "" }));
     } catch (error) {
       console.error("Error adding comment:", error);
+    }
+  };
+
+  const deleteComment = async (postId, commentId, currentCommentsCount) => {
+    try {
+      await deleteDoc(doc(db, "posts", postId, "comments", commentId));
+      const postRef = doc(db, "posts", postId);
+      await updateDoc(postRef, {
+        commentsCount: Math.max(0, (currentCommentsCount || 1) - 1),
+      });
+    } catch (error) {
+      console.error("Error deleting comment:", error);
+    }
+  };
+
+  const startEditComment = (comment) => {
+    setEditingComment(comment);
+    setEditText(comment.text);
+  };
+
+  const saveEditedComment = async (postId, commentId) => {
+    if (!editText.trim()) return;
+
+    try {
+      const commentRef = doc(db, "posts", postId, "comments", commentId);
+      await updateDoc(commentRef, { text: editText.trim() });
+      setEditingComment(null);
+      setEditText("");
+    } catch (error) {
+      console.error("Error editing comment:", error);
     }
   };
 
@@ -137,30 +178,26 @@ export default function AnnouncementScreen({ navigation }) {
     setImageLoadingStates((prev) => ({ ...prev, [postId]: true }));
   };
 
-  // Calculate image height to maintain aspect ratio
   const calculateImageHeight = (postId, containerWidth = 350) => {
     const dimensions = imageDimensions[postId];
-    if (!dimensions) return 200; // Default height
-
+    if (!dimensions) return 200;
     const aspectRatio = dimensions.width / dimensions.height;
     const calculatedHeight = containerWidth / aspectRatio;
-    
-    // Set reasonable min and max heights
     return Math.min(Math.max(calculatedHeight, 150), 400);
   };
 
   useEffect(() => {
-    const postsQuery = query(collection(db, "posts"), orderBy("createdAt", "desc"));
+    const postsQuery = query(
+      collection(db, "posts"),
+      orderBy("createdAt", "desc")
+    );
 
     const unsubscribePosts = onSnapshot(
       postsQuery,
       async (snapshot) => {
         const postsData = snapshot.docs.map((docSnap) => {
           const data = docSnap.data();
-          
-          // Use mediaUrl instead of imageUrl (based on your logs)
           const imageUrl = data.mediaUrl || data.imageUrl || "";
-          
           return {
             id: docSnap.id,
             ...data,
@@ -168,7 +205,7 @@ export default function AnnouncementScreen({ navigation }) {
             description: data.content || "No description",
             author: { name: data.authorName || "HOA Member" },
             createdAt: data.createdAt,
-            imageUrl: imageUrl, // This is the key change - use mediaUrl
+            imageUrl: imageUrl,
             category: data.category || "announcement",
             reactsCount: data.reactsCount || 0,
             commentsCount: data.commentsCount || 0,
@@ -196,14 +233,18 @@ export default function AnnouncementScreen({ navigation }) {
               return {
                 id: commentDoc.id,
                 text: commentData.text || commentData.content || "",
-                user: commentData.authorName || commentData.user || commentData.userName || "Anonymous",
+                user:
+                  commentData.authorName ||
+                  commentData.user ||
+                  commentData.userName ||
+                  "Anonymous",
                 isAdmin: commentData.isAdmin || false,
                 createdAt: commentData.createdAt,
+                userId: commentData.userId,
                 ...commentData,
               };
             });
             setComments((prev) => ({ ...prev, [post.id]: postComments }));
-
             setCommentCounts((prev) => ({
               ...prev,
               [post.id]: commentsSnapshot.size,
@@ -238,7 +279,9 @@ export default function AnnouncementScreen({ navigation }) {
           </Text>
         </View>
         <View style={styles.postHeaderInfo}>
-          <Text style={styles.authorName}>{item.author?.name || "HOA Member"}</Text>
+          <Text style={styles.authorName}>
+            {item.author?.name || "HOA Member"}
+          </Text>
           <Text style={styles.postTime}>
             {item.createdAt
               ? new Date(item.createdAt.seconds * 1000).toLocaleString()
@@ -246,7 +289,9 @@ export default function AnnouncementScreen({ navigation }) {
           </Text>
         </View>
         <View style={styles.categoryBadge}>
-          <Text style={styles.categoryText}>{item.category?.toUpperCase()}</Text>
+          <Text style={styles.categoryText}>
+            {item.category?.toUpperCase()}
+          </Text>
         </View>
       </View>
 
@@ -254,26 +299,33 @@ export default function AnnouncementScreen({ navigation }) {
         <Text style={styles.postTitle}>{item.title}</Text>
         <Text style={styles.postDescription}>{item.description}</Text>
 
-        {item.imageUrl && !imageErrors[item.id] && item.imageUrl.trim() !== '' && !item.imageUrl.includes('via.placeholder.com') ? (
+        {item.imageUrl &&
+        !imageErrors[item.id] &&
+        item.imageUrl.trim() !== "" &&
+        !item.imageUrl.includes("via.placeholder.com") ? (
           <View style={styles.imageContainer}>
-            {imageLoadingStates[item.id] && (
-              <View style={[styles.imageLoader, { height: calculateImageHeight(item.id) }]}>
+            {imageLoadingStates[item.id] && !imageDimensions[item.id] ? ( // <-- MODIFIED LINE
+              <View
+                style={[
+                  styles.imageLoader,
+                  { height: calculateImageHeight(item.id) },
+                ]}
+              >
                 <ActivityIndicator size="large" color="#007AFF" />
                 <Text style={styles.loadingText}>Loading image...</Text>
               </View>
-            )}
-            <Image 
-              source={{ 
+            ) : null}
+            <Image
+              source={{
                 uri: item.imageUrl,
-                // Add cache control headers
-                cache: 'force-cache'
-              }} 
+                cache: "force-cache",
+              }}
               style={[
                 styles.postImage,
-                { 
+                {
                   height: calculateImageHeight(item.id),
                   minHeight: 150,
-                }
+                },
               ]}
               resizeMode="contain"
               onLoadStart={() => handleImageLoadStart(item.id)}
@@ -282,17 +334,16 @@ export default function AnnouncementScreen({ navigation }) {
             />
           </View>
         ) : null}
-        
+
         {imageErrors[item.id] && (
           <View style={styles.imageError}>
             <Ionicons name="image-outline" size={40} color="#ccc" />
             <Text style={styles.imageErrorText}>Image failed to load</Text>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.retryButton}
               onPress={() => {
-                // Reset error state and try loading again
-                setImageErrors(prev => ({ ...prev, [item.id]: false }));
-                setImageLoadingStates(prev => ({ ...prev, [item.id]: true }));
+                setImageErrors((prev) => ({ ...prev, [item.id]: false }));
+                setImageLoadingStates((prev) => ({ ...prev, [item.id]: true }));
               }}
             >
               <Text style={styles.retryButtonText}>Retry</Text>
@@ -303,12 +354,17 @@ export default function AnnouncementScreen({ navigation }) {
 
       <View style={styles.postStats}>
         <Text style={styles.statText}>{item.reactsCount || 0} likes</Text>
-        <Text style={styles.statText}>{commentCounts[item.id] || 0} comments</Text>
+        <Text style={styles.statText}>
+          {commentCounts[item.id] || 0} comments
+        </Text>
       </View>
 
       <View style={styles.postActions}>
         <TouchableOpacity
-          style={[styles.actionButton, hasUserReacted(item.id) && styles.activeActionButton]}
+          style={[
+            styles.actionButton,
+            hasUserReacted(item.id) && styles.activeActionButton,
+          ]}
           onPress={() => toggleLike(item.id)}
         >
           <Ionicons
@@ -317,13 +373,19 @@ export default function AnnouncementScreen({ navigation }) {
             color={hasUserReacted(item.id) ? "#e74c3c" : "#555"}
           />
           <Text
-            style={[styles.actionText, hasUserReacted(item.id) && styles.activeActionText]}
+            style={[
+              styles.actionText,
+              hasUserReacted(item.id) && styles.activeActionText,
+            ]}
           >
             Like
           </Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.actionButton} onPress={() => setSelectedPost(item)}>
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={() => setSelectedPost(item)}
+        >
           <Ionicons name="chatbubble-outline" size={20} color="#555" />
           <Text style={styles.actionText}>Comment</Text>
         </TouchableOpacity>
@@ -346,11 +408,17 @@ export default function AnnouncementScreen({ navigation }) {
         data={posts}
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
-        ListEmptyComponent={<Text style={styles.empty}>No announcements yet.</Text>}
+        ListEmptyComponent={
+          <Text style={styles.empty}>No announcements yet.</Text>
+        }
         contentContainerStyle={{ paddingBottom: 100 }}
       />
 
-      <Modal visible={!!selectedPost} animationType="slide" onRequestClose={() => setSelectedPost(null)}>
+      <Modal
+        visible={!!selectedPost}
+        animationType="slide"
+        onRequestClose={() => setSelectedPost(null)}
+      >
         <KeyboardAvoidingView
           style={{ flex: 1 }}
           behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -365,7 +433,10 @@ export default function AnnouncementScreen({ navigation }) {
                   {comments[selectedPost.id].map((comment) => (
                     <View
                       key={comment.id}
-                      style={[styles.commentRow, comment.isAdmin && styles.adminComment]}
+                      style={[
+                        styles.commentRow,
+                        comment.isAdmin && styles.adminComment,
+                      ]}
                     >
                       <View style={styles.commentAvatar}>
                         <Text style={styles.commentAvatarText}>
@@ -385,16 +456,80 @@ export default function AnnouncementScreen({ navigation }) {
                           </Text>
                           {comment.createdAt && (
                             <Text style={styles.commentTime}>
-                              {new Date(comment.createdAt.seconds * 1000).toLocaleTimeString(
-                                [],
-                                { hour: "2-digit", minute: "2-digit" }
-                              )}
+                              {new Date(
+                                comment.createdAt.seconds * 1000
+                              ).toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
                             </Text>
                           )}
                         </View>
-                        <Text style={styles.commentText}>
-                          {comment.text || comment.content || "No comment text"}
-                        </Text>
+
+                        {editingComment?.id === comment.id ? (
+                          <View
+                            style={{ flexDirection: "row", alignItems: "center" }}
+                          >
+                            <TextInput
+                              style={[
+                                styles.commentInput,
+                                { flex: 1, marginVertical: 4 },
+                              ]}
+                              value={editText}
+                              onChangeText={setEditText}
+                              autoFocus
+                            />
+                            <TouchableOpacity
+                              style={styles.saveButton}
+                              onPress={() =>
+                                saveEditedComment(selectedPost.id, comment.id)
+                              }
+                            >
+                              <Text style={{ color: "#fff" }}>Save</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[styles.cancelButton, { marginLeft: 6 }]}
+                              onPress={() => {
+                                setEditingComment(null);
+                                setEditText("");
+                              }}
+                            >
+                              <Text style={{ color: "#fff" }}>Cancel</Text>
+                            </TouchableOpacity>
+                          </View>
+                        ) : (
+                          <Text style={styles.commentText}>
+                            {comment.text ||
+                              comment.content ||
+                              "No comment text"}
+                          </Text>
+                        )}
+
+                        {(comment.userId === currentUser?.uid ||
+                          adminUIDs.includes(currentUser?.uid)) && (
+                          <View style={styles.commentActions}>
+                            <TouchableOpacity
+                              onPress={() => startEditComment(comment)}
+                            >
+                              <Text style={styles.actionLink}>Edit</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              onPress={() =>
+                                deleteComment(
+                                  selectedPost.id,
+                                  comment.id,
+                                  selectedPost.commentsCount
+                                )
+                              }
+                            >
+                              <Text
+                                style={[styles.actionLink, { color: "red" }]}
+                              >
+                                Delete
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                        )}
                       </View>
                     </View>
                   ))}
@@ -410,13 +545,20 @@ export default function AnnouncementScreen({ navigation }) {
                   autoFocus
                   value={commentTexts[selectedPost.id] || ""}
                   onChangeText={(text) =>
-                    setCommentTexts((prev) => ({ ...prev, [selectedPost.id]: text }))
+                    setCommentTexts((prev) => ({
+                      ...prev,
+                      [selectedPost.id]: text,
+                    }))
                   }
-                  onSubmitEditing={() => addComment(selectedPost.id, selectedPost.commentsCount)}
+                  onSubmitEditing={() =>
+                    addComment(selectedPost.id, selectedPost.commentsCount)
+                  }
                 />
                 <TouchableOpacity
                   style={styles.sendButton}
-                  onPress={() => addComment(selectedPost.id, selectedPost.commentsCount)}
+                  onPress={() =>
+                    addComment(selectedPost.id, selectedPost.commentsCount)
+                  }
                 >
                   <Ionicons name="send" size={20} color="white" />
                 </TouchableOpacity>
@@ -424,108 +566,208 @@ export default function AnnouncementScreen({ navigation }) {
             )}
 
             <TouchableOpacity
-              style={{ padding: 12, alignItems: "center", backgroundColor: "#004d40" }}
+              style={{
+                padding: 12,
+                alignItems: "center",
+                backgroundColor: "#004d40",
+              }}
               onPress={() => setSelectedPost(null)}
             >
-              <Text style={{ color: "#fff", fontWeight: "bold" }}>Close</Text>
+              <Text style={{ color: "white", fontWeight: "bold" }}>
+                Close
+              </Text>
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
       </Modal>
-
-      <View style={styles.footer}>
-        <TouchableOpacity style={styles.footerButton} onPress={() => navigation.navigate("Profile")}>
-          <Ionicons name="person-circle" size={22} color="#fff" />
-          <Text style={styles.footerText}>Account</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.footerButton} onPress={() => navigation.navigate("Home")}>
-          <Ionicons name="home" size={22} color="#fff" />
-          <Text style={styles.footerText}>Home</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.footerButton} onPress={() => navigation.replace("Login")}>
-          <Ionicons name="log-out" size={22} color="#fff" />
-          <Text style={styles.footerText}>Log out</Text>
-        </TouchableOpacity>
-      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  wrapper: { flex: 1, backgroundColor: "#f5f5f5" },
-  center: { flex: 1, justifyContent: "center", alignItems: "center" },
-  loadingText: { marginTop: 10, fontSize: 16, color: "#555" },
-  empty: { textAlign: "center", marginTop: 20, fontSize: 16, color: "#555" },
-  postContainer: { backgroundColor: "#fff", padding: 12, margin: 10, borderRadius: 8 },
-  postHeader: { flexDirection: "row", alignItems: "center", marginBottom: 8 },
+  wrapper: {
+    flex: 1,
+    backgroundColor: "#f0f2f5",
+  },
+  center: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 14,
+    color: "#666",
+  },
+  empty: {
+    textAlign: "center",
+    marginTop: 50,
+    fontSize: 16,
+    color: "#555",
+  },
+  postContainer: {
+    backgroundColor: "white",
+    borderRadius: 12,
+    margin: 10,
+    padding: 15,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  postHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 10,
+  },
   avatar: {
+    backgroundColor: "#007AFF",
+    borderRadius: 20,
     width: 40,
     height: 40,
-    borderRadius: 20,
-    backgroundColor: "#007AFF",
     justifyContent: "center",
     alignItems: "center",
     marginRight: 10,
   },
-  avatarText: { color: "#fff", fontSize: 18, fontWeight: "bold" },
-  postHeaderInfo: { flex: 1 },
-  authorName: { fontWeight: "bold", fontSize: 16 },
-  postTime: { fontSize: 12, color: "#666" },
+  avatarText: {
+    color: "white",
+    fontSize: 18,
+    fontWeight: "bold",
+  },
+  postHeaderInfo: {
+    flex: 1,
+  },
+  authorName: {
+    fontWeight: "bold",
+    fontSize: 16,
+    color: "#333",
+  },
+  postTime: {
+    fontSize: 12,
+    color: "#777",
+  },
   categoryBadge: {
-    backgroundColor: "#eee",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
+    backgroundColor: "#e1f5fe",
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 6,
   },
-  categoryText: { fontSize: 12, color: "#333" },
-  postContent: { marginVertical: 8 },
-  postTitle: { fontSize: 16, fontWeight: "bold", marginBottom: 4 },
-  postDescription: { fontSize: 14, color: "#444" },
+  categoryText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#007AFF",
+  },
+  postContent: {
+    marginBottom: 10,
+  },
+  postTitle: {
+    fontWeight: "bold",
+    fontSize: 16,
+    marginBottom: 4,
+  },
+  postDescription: {
+    fontSize: 14,
+    color: "#555",
+  },
   imageContainer: {
-    position: 'relative',
-    marginTop: 8,
-    backgroundColor: '#f9f9f9', // Light background for better contrast
+    marginTop: 10,
     borderRadius: 8,
-    overflow: 'hidden',
+    overflow: "hidden",
+    backgroundColor: "#f8f8f8",
   },
-  postImage: { 
+  postImage: {
     width: "100%",
     borderRadius: 8,
+    backgroundColor: "#f0f0f0",
   },
   imageLoader: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 0,
-    bottom: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1,
-    backgroundColor: '#f9f9f9',
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#f0f0f0",
   },
   imageError: {
-    height: 200,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f9f9f9',
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+    backgroundColor: "#f8f8f8",
     borderRadius: 8,
-    marginTop: 8,
+    marginTop: 10,
   },
   imageErrorText: {
     marginTop: 8,
-    color: '#999',
+    color: "#888",
     fontSize: 14,
   },
-  postStats: { flexDirection: "row", justifyContent: "space-between", marginVertical: 6 },
-  statText: { fontSize: 14, color: "#666" },
-  postActions: { flexDirection: "row", justifyContent: "space-around", marginTop: 6 },
-  actionButton: { flexDirection: "row", alignItems: "center", padding: 6 },
-  actionText: { marginLeft: 4, fontSize: 14, color: "#555" },
-  activeActionButton: { backgroundColor: "#fee" },
-  activeActionText: { color: "#e74c3c" },
-  commentsSection: { padding: 12 },
-  commentTitle: { fontWeight: "bold", fontSize: 16, marginBottom: 8 },
-  commentRow: { flexDirection: "row", marginBottom: 10 },
+  retryButton: {
+    marginTop: 10,
+    backgroundColor: "#007AFF",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  retryButtonText: {
+    color: "white",
+    fontWeight: "bold",
+  },
+  postStats: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: "#eee",
+    marginVertical: 8,
+  },
+  statText: {
+    fontSize: 13,
+    color: "#666",
+  },
+  postActions: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    marginTop: 5,
+  },
+  actionButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 8,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    backgroundColor: "#f8f9fa",
+  },
+  activeActionButton: {
+    backgroundColor: "#ffebee",
+  },
+  actionText: {
+    marginLeft: 6,
+    fontSize: 14,
+    color: "#555",
+    fontWeight: "600",
+  },
+  activeActionText: {
+    color: "#e74c3c",
+  },
+  commentsSection: {
+    padding: 15,
+    borderTopWidth: 1,
+    borderColor: "#eee",
+  },
+  commentTitle: {
+    fontWeight: "bold",
+    fontSize: 16,
+    marginBottom: 10,
+  },
+  commentRow: {
+    flexDirection: "row",
+    marginBottom: 12,
+    backgroundColor: "#f9f9f9",
+    borderRadius: 8,
+    padding: 8,
+  },
+  adminComment: {
+    backgroundColor: "#fff8e1",
+  },
   commentAvatar: {
     width: 32,
     height: 32,
@@ -533,54 +775,77 @@ const styles = StyleSheet.create({
     backgroundColor: "#007AFF",
     justifyContent: "center",
     alignItems: "center",
-    marginRight: 8,
+    marginRight: 10,
   },
-  commentAvatarText: { color: "#fff", fontSize: 14, fontWeight: "bold" },
-  commentContent: { flex: 1 },
-  commentHeader: { flexDirection: "row", justifyContent: "space-between" },
-  commentUserName: { fontWeight: "bold", fontSize: 14 },
-  adminName: { color: "#e67e22" },
-  commentTime: { fontSize: 12, color: "#999", marginLeft: 8 },
-  commentText: { fontSize: 14, marginTop: 2 },
-  commentInputContainer: {
+  commentAvatarText: {
+    color: "white",
+    fontWeight: "bold",
+  },
+  commentContent: {
+    flex: 1,
+  },
+  commentHeader: {
     flexDirection: "row",
-    padding: 8,
-    borderTopWidth: 1,
-    borderColor: "#ccc",
-    backgroundColor: "#fff",
+    justifyContent: "space-between",
   },
-  commentInput: { flex: 1, borderWidth: 1, borderColor: "#ccc", borderRadius: 20, paddingHorizontal: 12, marginRight: 8 },
-  sendButton: {
-    backgroundColor: "#007AFF",
-    borderRadius: 20,
-    width: 40,
-    height: 40,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  retryButton: {
-    marginTop: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: '#007AFF',
-    borderRadius: 4,
-  },
-  retryButtonText: {
-    color: 'white',
+  commentUserName: {
+    fontWeight: "bold",
     fontSize: 14,
-    fontWeight: 'bold',
   },
-  debugText: {
-    fontSize: 10,
-    color: '#999',
+  adminName: {
+    color: "#e67e22",
+  },
+  commentTime: {
+    fontSize: 11,
+    color: "#777",
+  },
+  commentText: {
+    fontSize: 14,
+    marginTop: 2,
+  },
+  commentActions: {
+    flexDirection: "row",
     marginTop: 4,
   },
-  footer: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    backgroundColor: "#004d40",
-    paddingVertical: 10,
+  actionLink: {
+    marginRight: 12,
+    fontSize: 13,
+    fontWeight: "bold",
+    color: "#007AFF",
   },
-  footerButton: { alignItems: "center" },
-  footerText: { color: "#fff", fontSize: 12, marginTop: 2 },
+  commentInputContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 10,
+    borderTopWidth: 1,
+    borderColor: "#eee",
+    backgroundColor: "white",
+  },
+  commentInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#ddd",
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginRight: 8,
+    fontSize: 14,
+  },
+  sendButton: {
+    backgroundColor: "#007AFF",
+    padding: 10,
+    borderRadius: 20,
+  },
+  saveButton: {
+    backgroundColor: "#007AFF",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  cancelButton: {
+    backgroundColor: "#999",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
 });
