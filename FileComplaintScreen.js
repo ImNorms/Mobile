@@ -94,9 +94,11 @@ export default function FileComplaintScreen({ navigation }) {
         ? decodeURIComponent(uri.substring(lastSlash + 1))
         : `file_${Date.now()}`;
       
+      // Add timestamp to ensure uniqueness
       const timestamp = Date.now();
       const randomId = Math.random().toString(36).substring(2, 8);
       
+      // If file has extension, preserve it
       const dotIndex = baseName.lastIndexOf('.');
       if (dotIndex > 0) {
         const nameWithoutExt = baseName.substring(0, dotIndex);
@@ -118,6 +120,7 @@ export default function FileComplaintScreen({ navigation }) {
     const storageRef = ref(storage, `complaints/${userId}/${finalFileName}`);
 
     try {
+      // Fetch the file and convert to blob
       const response = await fetch(uri);
       if (!response.ok) {
         throw new Error(`Failed to fetch file: ${response.status} ${response.statusText}`);
@@ -125,10 +128,12 @@ export default function FileComplaintScreen({ navigation }) {
       
       const blob = await response.blob();
       
+      // Validate file size (limit to 10MB)
       if (blob.size > 10 * 1024 * 1024) {
         throw new Error('File too large. Please select a file smaller than 10MB.');
       }
       
+      // Add metadata to help with CORS and file handling
       const metadata = {
         contentType: blob.type || 'application/octet-stream',
         customMetadata: {
@@ -137,19 +142,21 @@ export default function FileComplaintScreen({ navigation }) {
         }
       };
 
+      // Upload the blob
       const uploadResult = await uploadBytes(storageRef, blob, metadata);
       
+      // Get download URL
       const downloadUrl = await getDownloadURL(uploadResult.ref);
       
-      //  *** CHANGE IS HERE ***
-      // Renamed 'url' to 'photoURL' to match your requirement
       return { 
-        photoURL: downloadUrl, 
+        url: downloadUrl, 
         name: finalFileName,
+        photoURL: downloadUrl,  // ✅ new field
         type: blob.type || 'unknown',
         size: blob.size || 0
       };
     } catch (error) {
+      // Provide more specific error messages
       if (error.code === 'storage/unauthorized') {
         throw new Error('Upload permission denied. Please check your authentication.');
       } else if (error.code === 'storage/canceled') {
@@ -166,6 +173,7 @@ export default function FileComplaintScreen({ navigation }) {
 
   const pickImage = async () => {
     try {
+      // Request permissions
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== "granted") {
         Alert.alert(
@@ -175,6 +183,7 @@ export default function FileComplaintScreen({ navigation }) {
         return;
       }
 
+      // Launch image picker with newer syntax to avoid deprecation warning
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: false,
@@ -189,6 +198,7 @@ export default function FileComplaintScreen({ navigation }) {
 
       setUploading(true);
       
+      // Create a proper filename for images
       const fileName = `image_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.jpg`;
       const uploaded = await uploadFile(asset.uri, fileName);
       
@@ -210,7 +220,7 @@ export default function FileComplaintScreen({ navigation }) {
   const pickDocument = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: '*/*',
+        type: '*/*', // Allow all file types
         multiple: false,
         copyToCacheDirectory: true,
       });
@@ -223,6 +233,7 @@ export default function FileComplaintScreen({ navigation }) {
 
       setUploading(true);
       
+      // Use the original filename if available, otherwise generate one
       const originalName = asset.name || asset.fileName || getFileNameFromUri(uri);
       const uploaded = await uploadFile(uri, originalName);
       
@@ -262,19 +273,18 @@ export default function FileComplaintScreen({ navigation }) {
 
     try {
       setUploading(true);
-      
-      await addDoc(collection(db, "complaints"), {
-        userId: user.uid,
-        userEmail: user.email || '',
-        name: name.trim(),
-        contactNo: contactNo.trim(),
-        address: address.trim(),
-        complaint: complaint.trim(),
-        attachments,
-        status: "New",
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+   await addDoc(collection(db, "complaints"), {
+  userId: user.uid,
+  userEmail: user.email || '',
+  name: name.trim(),
+  contactNo: contactNo.trim(),
+  address: address.trim(),
+  complaint: complaint.trim(),
+  attachments, // ✅ each attachment now has photoURL
+  status: "new",
+  createdAt: serverTimestamp(),
+  updatedAt: serverTimestamp(),
+});
 
       Alert.alert("Success", "Complaint submitted successfully!", [
         {
@@ -283,6 +293,7 @@ export default function FileComplaintScreen({ navigation }) {
         }
       ]);
       
+      // Reset form
       setName("");
       setContactNo("");
       setAddress("");
@@ -367,17 +378,16 @@ export default function FileComplaintScreen({ navigation }) {
               const isImage = file.name && /\.(jpeg|jpg|png|gif|webp|bmp)$/i.test(file.name);
               
               return (
-                <View key={`${file.photoURL}-${idx}`} style={styles.attachmentItem}>
+                <View key={`${file.url}-${idx}`} style={styles.attachmentItem}>
                   {isImage ? (
+                    // Image Preview - Clickable
                     <TouchableOpacity 
                       style={styles.imagePreviewContainer}
-                      // Use file.photoURL here
-                      onPress={() => viewImage(file.photoURL, file.name)}
+                      onPress={() => viewImage(file.url, file.name)}
                       activeOpacity={0.7}
                     >
                       <Image 
-                        // And here
-                        source={{ uri: file.photoURL }} 
+                        source={{ uri: file.url }} 
                         style={styles.imagePreview}
                         resizeMode="cover"
                       />
@@ -395,7 +405,7 @@ export default function FileComplaintScreen({ navigation }) {
                       <View style={styles.buttonContainer}>
                         <TouchableOpacity
                           onPress={(e) => {
-                            e.stopPropagation();
+                            e.stopPropagation(); // Prevent image modal from opening
                             removeAttachment(idx);
                           }}
                           style={styles.removeButton}
@@ -406,10 +416,10 @@ export default function FileComplaintScreen({ navigation }) {
                       </View>
                     </TouchableOpacity>
                   ) : (
+                    // Document Preview - Clickable
                     <TouchableOpacity 
                       style={styles.documentPreviewContainer}
-                      // And here
-                      onPress={() => openDocument(file.photoURL, file.name)}
+                      onPress={() => openDocument(file.url, file.name)}
                       activeOpacity={0.7}
                     >
                       <View style={styles.documentIcon}>
@@ -435,7 +445,7 @@ export default function FileComplaintScreen({ navigation }) {
                       </View>
                       <TouchableOpacity
                         onPress={(e) => {
-                          e.stopPropagation();
+                          e.stopPropagation(); // Prevent document from opening
                           removeAttachment(idx);
                         }}
                         style={styles.removeButton}
@@ -464,6 +474,7 @@ export default function FileComplaintScreen({ navigation }) {
         </TouchableOpacity>
       </ScrollView>
 
+      {/* Image Modal for Full Screen Viewing */}
       <Modal
         visible={imageModalVisible}
         transparent={true}
@@ -504,6 +515,7 @@ export default function FileComplaintScreen({ navigation }) {
         </View>
       </Modal>
 
+      {/* Footer */}
       <View style={styles.footer}>
         <TouchableOpacity 
           style={styles.footerButton}
@@ -537,7 +549,7 @@ const { width } = Dimensions.get("window");
 
 const styles = StyleSheet.create({
   wrapper: { flex: 1, backgroundColor: "#fff" },
-  container: { padding: 20, paddingBottom: 100 },
+  container: { padding: 20, paddingBottom: 100 }, // space for footer
   title: { fontSize: 22, fontWeight: "bold", marginBottom: 20, color: "#333" },
   input: {
     borderWidth: 1,
