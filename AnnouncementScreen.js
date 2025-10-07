@@ -1,5 +1,5 @@
 // AnnouncementScreen.js
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -27,11 +27,14 @@ import {
   getDocs,
   where,
   getCountFromServer,
+  limit,
 } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { getAuth } from "firebase/auth";
 import { db } from "./firebaseConfig";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useFocusEffect } from "@react-navigation/native";
 
 export default function AnnouncementScreen({ navigation }) {
   const [posts, setPosts] = useState([]);
@@ -52,6 +55,66 @@ export default function AnnouncementScreen({ navigation }) {
   const storage = getStorage();
 
   const adminUIDs = ["ADMIN_UID_1", "ADMIN_UID_2"];
+
+  // -----------------------------
+  // Notification / Red Dot Logic
+  // -----------------------------
+  const getLastSeenAnnouncement = async (uid) => {
+    if (!uid) return null;
+    return await AsyncStorage.getItem(`lastSeenAnnouncement_${uid}`);
+  };
+
+  const setLastSeenAnnouncement = async (uid, timestamp) => {
+    if (!uid) return;
+    await AsyncStorage.setItem(`lastSeenAnnouncement_${uid}`, String(timestamp));
+  };
+
+  // Listen for latest announcement post
+  useEffect(() => {
+    if (!currentUser?.uid) return;
+
+    const latestPostQuery = query(
+      collection(db, "posts"),
+      orderBy("createdAt", "desc"),
+      limit(1)
+    );
+
+    const unsubscribe = onSnapshot(latestPostQuery, async (snapshot) => {
+      if (!snapshot.empty) {
+        const latestPost = snapshot.docs[0].data();
+        const latestTimestamp = latestPost.createdAt?.seconds || 0;
+
+        const lastSeenRaw = await getLastSeenAnnouncement(currentUser.uid);
+        const lastSeen = Number(lastSeenRaw) || 0;
+
+        if (!lastSeenRaw) {
+          // first time user opens, store initial value but no red dot
+          await setLastSeenAnnouncement(currentUser.uid, latestTimestamp);
+          navigation.setParams({ hasNewAnnouncement: false });
+        } else {
+          navigation.setParams({
+            hasNewAnnouncement: latestTimestamp > lastSeen,
+          });
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, [currentUser]);
+
+  // Mark announcements as seen when screen is opened
+  useFocusEffect(
+    useCallback(() => {
+      if (posts.length > 0 && currentUser?.uid) {
+        const latest = posts[0].createdAt?.seconds;
+        if (latest) {
+          setLastSeenAnnouncement(currentUser.uid, latest);
+          navigation.setParams({ hasNewAnnouncement: false });
+        }
+      }
+    }, [posts, currentUser])
+  );
+  // -----------------------------
 
   const getCommentCount = async (postId) => {
     try {
@@ -304,7 +367,7 @@ export default function AnnouncementScreen({ navigation }) {
         item.imageUrl.trim() !== "" &&
         !item.imageUrl.includes("via.placeholder.com") ? (
           <View style={styles.imageContainer}>
-            {imageLoadingStates[item.id] && !imageDimensions[item.id] ? ( // <-- MODIFIED LINE
+            {imageLoadingStates[item.id] && !imageDimensions[item.id] ? (
               <View
                 style={[
                   styles.imageLoader,
