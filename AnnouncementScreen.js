@@ -28,6 +28,8 @@ import {
   where,
   getCountFromServer,
   limit,
+  getDoc,
+  writeBatch,
 } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { getAuth } from "firebase/auth";
@@ -49,12 +51,199 @@ export default function AnnouncementScreen({ navigation }) {
   const [imageDimensions, setImageDimensions] = useState({});
   const [editingComment, setEditingComment] = useState(null);
   const [editText, setEditText] = useState("");
+  const [userProfiles, setUserProfiles] = useState({}); // Store user profile data
 
   const auth = getAuth();
   const currentUser = auth.currentUser;
   const storage = getStorage();
 
   const adminUIDs = ["ADMIN_UID_1", "ADMIN_UID_2"];
+
+  // -----------------------------
+  // Update User Name in All Comments
+  // -----------------------------
+  const updateUserNameInAllComments = async (userId, newName, newPhotoURL = null) => {
+    if (!userId || !newName) return;
+    
+    try {
+      console.log(`🔄 Updating username for ${userId} to ${newName} in all comments...`);
+      
+      // Get all posts
+      const postsQuery = query(collection(db, "posts"));
+      const postsSnapshot = await getDocs(postsQuery);
+      
+      const batch = writeBatch(db);
+      let updatedCommentsCount = 0;
+
+      // Loop through all posts
+      for (const postDoc of postsSnapshot.docs) {
+        const postId = postDoc.id;
+        
+        // Get all comments for this post
+        const commentsQuery = query(
+          collection(db, "posts", postId, "comments"),
+          where("userId", "==", userId)
+        );
+        const commentsSnapshot = await getDocs(commentsQuery);
+        
+        // Update each comment with the new name and photoURL
+        commentsSnapshot.forEach((commentDoc) => {
+          const commentRef = doc(db, "posts", postId, "comments", commentDoc.id);
+          const updateData = {
+            authorName: newName,
+            userName: newName,
+            user: newName
+          };
+          
+          // Only update photoURL if provided
+          if (newPhotoURL) {
+            updateData.photoURL = newPhotoURL;
+          }
+          
+          batch.update(commentRef, updateData);
+          updatedCommentsCount++;
+        });
+      }
+
+      // Commit all updates in a single batch
+      if (updatedCommentsCount > 0) {
+        await batch.commit();
+        console.log(`✅ Successfully updated ${updatedCommentsCount} comments with new username: ${newName}`);
+        
+        // Also update reacts with the new author name and photoURL
+        await updateUserNameInAllReacts(userId, newName, newPhotoURL);
+      } else {
+        console.log("ℹ️ No comments found to update for user:", userId);
+      }
+    } catch (error) {
+      console.error("❌ Error updating username in comments:", error);
+    }
+  };
+
+  // Update User Name in All Reacts
+  const updateUserNameInAllReacts = async (userId, newName, newPhotoURL = null) => {
+    if (!userId || !newName) return;
+    
+    try {
+      console.log(`🔄 Updating username for ${userId} to ${newName} in all reacts...`);
+      
+      // Get all posts
+      const postsQuery = query(collection(db, "posts"));
+      const postsSnapshot = await getDocs(postsQuery);
+      
+      const batch = writeBatch(db);
+      let updatedReactsCount = 0;
+
+      // Loop through all posts
+      for (const postDoc of postsSnapshot.docs) {
+        const postId = postDoc.id;
+        
+        // Get all reacts for this post by this user
+        const reactsQuery = query(
+          collection(db, "posts", postId, "reacts"),
+          where("userId", "==", userId)
+        );
+        const reactsSnapshot = await getDocs(reactsQuery);
+        
+        // Update each react with the new author name and photoURL
+        reactsSnapshot.forEach((reactDoc) => {
+          const reactRef = doc(db, "posts", postId, "reacts", reactDoc.id);
+          const updateData = {
+            authorName: newName
+          };
+          
+          // Only update photoURL if provided
+          if (newPhotoURL) {
+            updateData.photoURL = newPhotoURL;
+          }
+          
+          batch.update(reactRef, updateData);
+          updatedReactsCount++;
+        });
+      }
+
+      // Commit all updates in a single batch
+      if (updatedReactsCount > 0) {
+        await batch.commit();
+        console.log(`✅ Successfully updated ${updatedReactsCount} reacts with new username: ${newName}`);
+      } else {
+        console.log("ℹ️ No reacts found to update for user:", userId);
+      }
+    } catch (error) {
+      console.error("❌ Error updating username in reacts:", error);
+    }
+  };
+
+  // Get user profile data with photoURL
+  const getUserProfileData = async (userId) => {
+    if (!userId) return { name: "User", photoURL: null };
+    
+    try {
+      // Check if we already have the user profile
+      if (userProfiles[userId]) {
+        return userProfiles[userId];
+      }
+      
+      // Fetch from Firestore
+      const userRef = doc(db, "members", userId);
+      const userSnap = await getDoc(userRef);
+      
+      if (userSnap.exists()) {
+        const userData = userSnap.data();
+        const profileData = {
+          name: userData.name || userData.displayName || "User",
+          photoURL: userData.photoURL || null
+        };
+        
+        // Update local state
+        setUserProfiles(prev => ({
+          ...prev,
+          [userId]: profileData
+        }));
+        
+        return profileData;
+      }
+      
+      return { name: "User", photoURL: null };
+    } catch (error) {
+      console.error("Error fetching user profile:", error);
+      return { name: "User", photoURL: null };
+    }
+  };
+
+  // Listen for user profile changes
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const userRef = doc(db, "members", currentUser.uid);
+    
+    const unsubscribe = onSnapshot(userRef, async (userSnap) => {
+      if (userSnap.exists()) {
+        const userData = userSnap.data();
+        const newName = userData.name || userData.displayName;
+        const newPhotoURL = userData.photoURL || null;
+        const oldName = userProfiles[currentUser.uid]?.name;
+        const oldPhotoURL = userProfiles[currentUser.uid]?.photoURL;
+
+        // If name or photo changed, update all comments and reacts
+        if (newName && oldName && (newName !== oldName || newPhotoURL !== oldPhotoURL)) {
+          console.log(`🔄 Detected profile change: ${oldName} -> ${newName}`);
+          await updateUserNameInAllComments(currentUser.uid, newName, newPhotoURL);
+        }
+
+        // Update local user profile
+        setUserProfiles(prev => ({
+          ...prev,
+          [currentUser.uid]: {
+            name: newName || "User",
+            photoURL: newPhotoURL
+          }
+        }));
+      }
+    });
+
+    return () => unsubscribe();
+  }, [currentUser]);
 
   // -----------------------------
   // Notification / Red Dot Logic
@@ -116,6 +305,29 @@ export default function AnnouncementScreen({ navigation }) {
   );
   // -----------------------------
 
+  // Fetch user profile data
+  const fetchUserProfile = async (userId) => {
+    if (!userId || userProfiles[userId]) return;
+    
+    try {
+      const userRef = doc(db, "members", userId);
+      const userSnap = await getDoc(userRef);
+      
+      if (userSnap.exists()) {
+        const userData = userSnap.data();
+        setUserProfiles(prev => ({
+          ...prev,
+          [userId]: {
+            name: userData.name || userData.displayName || "User",
+            photoURL: userData.photoURL || null
+          }
+        }));
+      }
+    } catch (error) {
+      console.error("Error fetching user profile:", error);
+    }
+  };
+
   const getCommentCount = async (postId) => {
     try {
       const commentsRef = collection(db, "posts", postId, "comments");
@@ -148,9 +360,19 @@ export default function AnnouncementScreen({ navigation }) {
       const postRef = doc(db, "posts", postId);
       const currentPost = posts.find((p) => p.id === postId);
 
+      // Get current user's profile data with photoURL
+      const userProfile = await getUserProfileData(currentUser.uid);
+      const userPhotoURL = userProfile.photoURL || currentUser.photoURL || null;
+      const userName = userProfile.name || currentUser.displayName || "User";
+
+      console.log("🔄 Adding react with photoURL:", userPhotoURL);
+
       if (snapshot.empty) {
+        // Add photoURL when creating react
         await addDoc(reactsRef, {
           userId: currentUser.uid,
+          authorName: userName,
+          photoURL: userPhotoURL, // Add photoURL here
           createdAt: serverTimestamp(),
           type: "like",
         });
@@ -176,11 +398,19 @@ export default function AnnouncementScreen({ navigation }) {
     try {
       const commentsRef = collection(db, "posts", postId, "comments");
 
+      // Get current user's profile data with photoURL
+      const userProfile = await getUserProfileData(currentUser.uid);
+      const userPhotoURL = userProfile.photoURL || currentUser.photoURL || null;
+      const userName = userProfile.name || currentUser.displayName || "Anonymous";
+
+      console.log("🔄 Adding comment with photoURL:", userPhotoURL);
+
       await addDoc(commentsRef, {
         text: text.trim(),
-        authorName: currentUser.displayName || "Anonymous",
+        authorName: userName,
         userId: currentUser.uid,
-        userName: currentUser.displayName || "Anonymous",
+        userName: userName,
+        photoURL: userPhotoURL, // Add photoURL here
         isAdmin: adminUIDs.includes(currentUser.uid),
         createdAt: serverTimestamp(),
       });
@@ -249,6 +479,35 @@ export default function AnnouncementScreen({ navigation }) {
     return Math.min(Math.max(calculatedHeight, 150), 400);
   };
 
+  // Render user avatar with profile image or fallback
+  const renderUserAvatar = (userId, photoURL = null, size = 32) => {
+    // Use the provided photoURL first, then check userProfiles
+    const userProfile = userProfiles[userId];
+    const avatarPhotoURL = photoURL || userProfile?.photoURL;
+    
+    if (avatarPhotoURL) {
+      return (
+        <Image
+          source={{ uri: avatarPhotoURL }}
+          style={{
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+          }}
+        />
+      );
+    }
+    
+    // Fallback to initial avatar
+    return (
+      <View style={[styles.commentAvatar, { width: size, height: size, borderRadius: size / 2 }]}>
+        <Text style={styles.commentAvatarText}>
+          {(userProfile?.name || "U").charAt(0).toUpperCase()}
+        </Text>
+      </View>
+    );
+  };
+
   useEffect(() => {
     const postsQuery = query(
       collection(db, "posts"),
@@ -293,6 +552,12 @@ export default function AnnouncementScreen({ navigation }) {
           onSnapshot(commentsQuery, (commentsSnapshot) => {
             const postComments = commentsSnapshot.docs.map((commentDoc) => {
               const commentData = commentDoc.data();
+              
+              // Fetch user profile for each comment author
+              if (commentData.userId) {
+                fetchUserProfile(commentData.userId);
+              }
+              
               return {
                 id: commentDoc.id,
                 text: commentData.text || commentData.content || "",
@@ -304,6 +569,7 @@ export default function AnnouncementScreen({ navigation }) {
                 isAdmin: commentData.isAdmin || false,
                 createdAt: commentData.createdAt,
                 userId: commentData.userId,
+                photoURL: commentData.photoURL || null, // Include photoURL from comment data
                 ...commentData,
               };
             });
@@ -316,10 +582,20 @@ export default function AnnouncementScreen({ navigation }) {
 
           const reactsQuery = query(collection(db, "posts", post.id, "reacts"));
           onSnapshot(reactsQuery, (reactsSnapshot) => {
-            const postReacts = reactsSnapshot.docs.map((reactDoc) => ({
-              id: reactDoc.id,
-              ...reactDoc.data(),
-            }));
+            const postReacts = reactsSnapshot.docs.map((reactDoc) => {
+              const reactData = reactDoc.data();
+              
+              // Fetch user profile for each react author
+              if (reactData.userId) {
+                fetchUserProfile(reactData.userId);
+              }
+              
+              return {
+                id: reactDoc.id,
+                ...reactData,
+                photoURL: reactData.photoURL || null, // Include photoURL from react data
+              };
+            });
             setReacts((prev) => ({ ...prev, [post.id]: postReacts }));
           });
         });
@@ -336,11 +612,7 @@ export default function AnnouncementScreen({ navigation }) {
   const renderItem = ({ item }) => (
     <View style={styles.postContainer}>
       <View style={styles.postHeader}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>
-            {(item.author?.name || "H").charAt(0).toUpperCase()}
-          </Text>
-        </View>
+        {renderUserAvatar(item.author?.uid || "default", null, 40)}
         <View style={styles.postHeaderInfo}>
           <Text style={styles.authorName}>
             {item.author?.name || "HOA Member"}
@@ -501,11 +773,9 @@ export default function AnnouncementScreen({ navigation }) {
                         comment.isAdmin && styles.adminComment,
                       ]}
                     >
-                      <View style={styles.commentAvatar}>
-                        <Text style={styles.commentAvatarText}>
-                          {(comment.user || "A").charAt(0).toUpperCase()}
-                        </Text>
-                      </View>
+                      {/* Profile Image for Comment - using comment's photoURL */}
+                      {renderUserAvatar(comment.userId, comment.photoURL, 32)}
+                      
                       <View style={styles.commentContent}>
                         <View style={styles.commentHeader}>
                           <Text
@@ -843,6 +1113,7 @@ const styles = StyleSheet.create({
   commentAvatarText: {
     color: "white",
     fontWeight: "bold",
+    fontSize: 12,
   },
   commentContent: {
     flex: 1,
