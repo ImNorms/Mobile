@@ -25,15 +25,13 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 const auth = getAuth();
 const db = getFirestore();
 const { width } = Dimensions.get("window");
-const cardWidth = (width - 36) / 2; // 12 margin on sides + 4 spacing between cards
+const cardWidth = (width - 36) / 2;
 
 export default function HomeScreen({ navigation, route }) {
   const [hasAnnouncement, setHasAnnouncement] = useState(false);
   const [hasEvent, setHasEvent] = useState(false);
-  const [hasAccounting, setHasAccounting] = useState(false);
   const [userName, setUserName] = useState("");
 
-  // Fetch user name
   useEffect(() => {
     const user = auth.currentUser;
     if (user) {
@@ -41,14 +39,12 @@ export default function HomeScreen({ navigation, route }) {
     }
   }, [auth.currentUser]);
 
-  // Update from navigation param (when AnnouncementScreen sets it)
   useEffect(() => {
     if (route?.params?.hasNewAnnouncement !== undefined) {
       setHasAnnouncement(route.params.hasNewAnnouncement);
     }
   }, [route?.params?.hasNewAnnouncement]);
 
-  // Announcement listener
   useEffect(() => {
     if (!auth.currentUser) return;
     const q = query(
@@ -68,6 +64,37 @@ export default function HomeScreen({ navigation, route }) {
         ) || 0;
       setHasAnnouncement(createdAtSeconds > lastSeen);
     });
+    return () => unsubscribe();
+  }, [auth.currentUser]);
+
+  useEffect(() => {
+    if (!auth.currentUser) return;
+
+    const q = query(collection(db, "events"), orderBy("start", "desc"), limit(1));
+
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
+      if (!auth.currentUser || snapshot.empty) return;
+
+      const latestDoc = snapshot.docs[0];
+      const eventData = latestDoc.data();
+
+      let eventTimestamp = 0;
+      if (eventData.start?.seconds) {
+        eventTimestamp = eventData.start.seconds * 1000;
+      } else if (eventData.start?.toDate) {
+        eventTimestamp = eventData.start.toDate().getTime();
+      } else {
+        eventTimestamp = Date.now();
+      }
+
+      const lastSeen =
+        Number(
+          await AsyncStorage.getItem(`lastSeenEvent_${auth.currentUser.uid}`)
+        ) || 0;
+
+      setHasEvent(eventTimestamp > lastSeen);
+    });
+
     return () => unsubscribe();
   }, [auth.currentUser]);
 
@@ -91,26 +118,58 @@ export default function HomeScreen({ navigation, route }) {
     navigation.navigate("Announcement");
   };
 
-  const handleLogout = () => {
-    signOut(auth)
-      .then(() => {
-        AsyncStorage.removeItem("lastSeenAnnouncement");
-        Alert.alert("Logged out", "You have been logged out successfully.");
-        navigation.replace("Login");
-      })
-      .catch((error) => Alert.alert("Error", error.message));
+  const handleOpenEvents = async () => {
+    if (!auth.currentUser) return;
+
+    const q = query(collection(db, "events"), orderBy("start", "desc"), limit(1));
+    const snapshot = await getDocs(q);
+
+    if (!snapshot.empty) {
+      const latestDoc = snapshot.docs[0];
+      const eventData = latestDoc.data();
+
+      let eventTimestamp = 0;
+      if (eventData.start?.seconds) {
+        eventTimestamp = eventData.start.seconds * 1000;
+      } else if (eventData.start?.toDate) {
+        eventTimestamp = eventData.start.toDate().getTime();
+      } else {
+        eventTimestamp = Date.now();
+      }
+
+      await AsyncStorage.setItem(
+        `lastSeenEvent_${auth.currentUser.uid}`,
+        String(eventTimestamp)
+      );
+      setHasEvent(false);
+    }
+
+    navigation.navigate("EventCalendar");
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      const userId = auth.currentUser?.uid;
+      if (userId) {
+        await AsyncStorage.removeItem(`lastSeenAnnouncement_${userId}`);
+        await AsyncStorage.removeItem(`lastSeenEvent_${userId}`);
+      }
+      Alert.alert("Logged out", "You have been logged out successfully.");
+      navigation.replace("Login");
+    } catch (error) {
+      Alert.alert("Error", error.message);
+    }
   };
 
   return (
     <View style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Header */}
         <View style={styles.headerBox}>
           <Text style={styles.header}>Homepage</Text>
           <Text style={styles.greeting}>Hello, {userName}</Text>
         </View>
 
-        {/* Post and Announcement Section */}
         <View style={styles.sectionBox}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Post and Announcement</Text>
@@ -133,9 +192,7 @@ export default function HomeScreen({ navigation, route }) {
           </TouchableOpacity>
         </View>
 
-        {/* Grid Section */}
         <View style={styles.grid}>
-          {/* Row 1 */}
           <View style={styles.row}>
             <TouchableOpacity
               style={[styles.card, { backgroundColor: "#007b83", width: cardWidth }]}
@@ -148,7 +205,7 @@ export default function HomeScreen({ navigation, route }) {
 
             <TouchableOpacity
               style={[styles.card, { backgroundColor: "#008C7A", width: cardWidth }]}
-              onPress={() => navigation.navigate("EventCalendar")}
+              onPress={handleOpenEvents}
             >
               <View style={{ position: "relative" }}>
                 <Ionicons name="calendar" size={26} color="#fff" />
@@ -159,16 +216,12 @@ export default function HomeScreen({ navigation, route }) {
             </TouchableOpacity>
           </View>
 
-          {/* Row 2 */}
           <View style={styles.row}>
             <TouchableOpacity
               style={[styles.card, { backgroundColor: "#005f99", width: cardWidth }]}
               onPress={() => navigation.navigate("Accounting")}
             >
-              <View style={{ position: "relative" }}>
-                <Ionicons name="wallet" size={26} color="#fff" />
-                {hasAccounting && <View style={styles.redDotSmall} />}
-              </View>
+              <Ionicons name="wallet" size={26} color="#fff" />
               <Text style={styles.cardText}>Accounting</Text>
               <Text style={styles.smallText}>Check Status</Text>
             </TouchableOpacity>
@@ -183,7 +236,6 @@ export default function HomeScreen({ navigation, route }) {
             </TouchableOpacity>
           </View>
 
-          {/* Row 3 */}
           <View style={styles.row}>
             <TouchableOpacity
               style={[styles.card, { backgroundColor: "#F39C12", width: cardWidth }]}
@@ -206,7 +258,6 @@ export default function HomeScreen({ navigation, route }) {
         </View>
       </ScrollView>
 
-      {/* Footer */}
       <View style={styles.footer}>
         <TouchableOpacity onPress={() => navigation.navigate("Profile")}>
           <Ionicons name="person-circle" size={22} color="#fff" />
@@ -228,55 +279,40 @@ export default function HomeScreen({ navigation, route }) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f4f4f4" },
   scrollContent: { paddingBottom: 110 },
-
   headerBox: { padding: 15, backgroundColor: "#00695C" },
   header: { fontSize: 20, fontWeight: "bold", color: "#fff" },
   greeting: { fontSize: 14, color: "#fff", marginTop: 2 },
-
   sectionBox: { backgroundColor: "#fff", margin: 12, borderRadius: 10, padding: 10 },
   sectionHeader: { flexDirection: "row", alignItems: "center" },
   sectionTitle: { fontSize: 16, fontWeight: "bold" },
-  banner: { width: "100%", height: width * 0.4, borderRadius: 8, marginTop: 8 }, // responsive height
+  banner: { width: "100%", height: width * 0.4, borderRadius: 8, marginTop: 8 },
   viewButton: { alignSelf: "flex-end", marginTop: 6 },
   viewText: { fontSize: 12, color: "#007b83" },
-
   grid: { marginHorizontal: 12 },
-  row: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 10,
-  },
-  card: {
-    marginHorizontal: 4,
-    padding: 15,
-    borderRadius: 10,
-    alignItems: "center",
-  },
-  cardText: {
-    color: "#fff",
-    fontWeight: "bold",
-    fontSize: 14,
-    marginTop: 5,
-    textAlign: "center",
-  },
+  row: { flexDirection: "row", justifyContent: "space-between", marginBottom: 10 },
+  card: { marginHorizontal: 4, padding: 15, borderRadius: 10, alignItems: "center" },
+  cardText: { color: "#fff", fontWeight: "bold", fontSize: 14, marginTop: 5, textAlign: "center" },
   smallText: { color: "#fff", fontSize: 11, marginTop: 3 },
   redDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
     backgroundColor: "red",
-    marginLeft: 5,
+    marginLeft: 6,
+    borderWidth: 2,
+    borderColor: "#fff",
   },
   redDotSmall: {
     position: "absolute",
-    top: -3,
-    right: -6,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    top: -6,
+    right: -8,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
     backgroundColor: "red",
+    borderWidth: 2,
+    borderColor: "#fff",
   },
-
   footer: {
     flexDirection: "row",
     justifyContent: "space-around",
